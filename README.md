@@ -1,5 +1,11 @@
 # biomodals
-bioinformatics tools running on modal
+Bioinformatics tools running on modal.
+
+## install and set up modal
+```
+pip install modal
+python3 -m modal setup
+```
 
 ## OmegaFold
 ```
