@@ -7,7 +7,7 @@ from modal import Image, Mount, Stub
 
 FORCE_BUILD = False
 MODAL_IN = "./modal_in/rfdiffusion"
-MODAL_OUT = "./modal_out/rfdiffusion"
+MODAL_OUT = "./modal_out"
 OUTPUT_ROOT = "rfdiffusion"
 
 stub = Stub()
@@ -40,16 +40,20 @@ image = (Image
          .run_commands("mv /RFdiffusion/* /root")
         )
 
-
+# ColabDesign imports
 import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 
 def get_pdb(pdb_code=None):
+    """FIXFIX stub"""
     return pdb_code
 
 def run_ananas(pdb_str, path, sym=None):
+    """AnAnaS : software for analytical analysis of symmetries in protein structures
+    https://hal.science/hal-02931690/document
+    """
     from colabdesign.rf.utils import sym_it
 
     pdb_filename = f"{OUTPUT_ROOT}/{path}/ananas_input.pdb"
@@ -63,7 +67,7 @@ def run_ananas(pdb_str, path, sym=None):
 
     # parse results
     try:
-        out = json.loads(open(out_filename,"r").read())
+        out = json.loads(open(out_filename, "r").read())
         results,AU = out[0], out[-1]["AU"]
         group = AU["group"]
         chains = AU["chain names"]
@@ -168,11 +172,10 @@ def run_inference(command, steps, num_designs=1, visual="none"):
     except KeyboardInterrupt:
         os.kill(pid, signal.SIGTERM)
 
-
 def run_diffusion(contigs, path, pdb=None, iterations=50,
-                                    symmetry="none", order=1, hotspot=None,
-                                    chains=None, add_potential=False,
-                                    num_designs=1, visual="none"):
+                  symmetry="none", order=1, hotspot=None,
+                  chains=None, add_potential=False,
+                  num_designs=1, visual="none"):
 
     from inference.utils import parse_pdb
     from colabdesign.rf.utils import get_ca
