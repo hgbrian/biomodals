@@ -8,6 +8,7 @@ from modal import Image, Mount, Stub
 FORCE_BUILD = False
 MODAL_IN = "./modal_in"
 MODAL_OUT = "./modal_out"
+OUTPUT_ROOT = "rfdiffusion"
 
 stub = Stub()
 
@@ -46,137 +47,137 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def get_pdb(pdb_code=None):
-  return pdb_code
+    return pdb_code
 
 def run_ananas(pdb_str, path, sym=None):
-  from colabdesign.rf.utils import sym_it
+    from colabdesign.rf.utils import sym_it
 
-  pdb_filename = f"outputs/{path}/ananas_input.pdb"
-  out_filename = f"outputs/{path}/ananas.json"
-  with open(pdb_filename,"w") as handle:
-    handle.write(pdb_str)
+    pdb_filename = f"{OUTPUT_ROOT}/{path}/ananas_input.pdb"
+    out_filename = f"{OUTPUT_ROOT}/{path}/ananas.json"
+    with open(pdb_filename,"w") as handle:
+        handle.write(pdb_str)
 
-  cmd = f"./ananas {pdb_filename} -u -j {out_filename}"
-  if sym is None: os.system(cmd)
-  else: os.system(f"{cmd} {sym}")
+    cmd = f"./ananas {pdb_filename} -u -j {out_filename}"
+    if sym is None: os.system(cmd)
+    else: os.system(f"{cmd} {sym}")
 
-  # parse results
-  try:
-    out = json.loads(open(out_filename,"r").read())
-    results,AU = out[0], out[-1]["AU"]
-    group = AU["group"]
-    chains = AU["chain names"]
-    rmsd = results["Average_RMSD"]
-    print(f"AnAnaS detected {group} symmetry at RMSD:{rmsd:.3}")
+    # parse results
+    try:
+        out = json.loads(open(out_filename,"r").read())
+        results,AU = out[0], out[-1]["AU"]
+        group = AU["group"]
+        chains = AU["chain names"]
+        rmsd = results["Average_RMSD"]
+        print(f"AnAnaS detected {group} symmetry at RMSD:{rmsd:.3}")
 
-    C = np.array(results['transforms'][0]['CENTER'])
-    A = [np.array(t["AXIS"]) for t in results['transforms']]
+        C = np.array(results['transforms'][0]['CENTER'])
+        A = [np.array(t["AXIS"]) for t in results['transforms']]
 
-    # apply symmetry and filter to the asymmetric unit
-    new_lines = []
-    for line in pdb_str.split("\n"):
-      if line.startswith("ATOM"):
-        chain = line[21:22]
-        if chain in chains:
-          x = np.array([float(line[i:(i+8)]) for i in [30,38,46]])
-          if group[0] == "c":
-            x = sym_it(x,C,A[0])
-          if group[0] == "d":
-            x = sym_it(x,C,A[1],A[0])
-          coord_str = "".join(["{:8.3f}".format(a) for a in x])
-          new_lines.append(line[:30]+coord_str+line[54:])
-      else:
-        new_lines.append(line)
-    return results, "\n".join(new_lines)
+        # apply symmetry and filter to the asymmetric unit
+        new_lines = []
+        for line in pdb_str.split("\n"):
+            if line.startswith("ATOM"):
+                chain = line[21:22]
+                if chain in chains:
+                    x = np.array([float(line[i:(i+8)]) for i in [30,38,46]])
+                    if group[0] == "c":
+                        x = sym_it(x,C,A[0])
+                    if group[0] == "d":
+                        x = sym_it(x,C,A[1],A[0])
+                    coord_str = "".join(["{:8.3f}".format(a) for a in x])
+                    new_lines.append(line[:30]+coord_str+line[54:])
+            else:
+                new_lines.append(line)
+        return results, "\n".join(new_lines)
 
-  except:
-    return None, pdb_str
+    except:
+        return None, pdb_str
 
 def run(command, steps, num_designs=1, visual="none"):
-  import os, time, signal
-  
-  def run_command_and_get_pid(command):
-    pid_file = '/dev/shm/pid'
-    os.system(f'nohup {command} > /dev/null & echo $! > {pid_file}')
-    with open(pid_file, 'r') as f:
-      pid = int(f.read().strip())
-    os.remove(pid_file)
-    return pid
+    import os, time, signal
+    
+    def run_command_and_get_pid(command):
+        pid_file = '/dev/shm/pid'
+        os.system(f'nohup {command} > /dev/null & echo $! > {pid_file}')
+        with open(pid_file, 'r') as f:
+            pid = int(f.read().strip())
+        os.remove(pid_file)
+        return pid
 
-  def is_process_running(pid):
-    try:
-      os.kill(pid, 0)
-    except OSError:
-      return False
-    else:
-      return True
-
-  #run_output = widgets.Output()
-  #progress = widgets.FloatProgress(min=0, max=1, description='running', bar_style='info')
-  #display(widgets.VBox([progress, run_output]))
-
-  # clear previous run
-  for n in range(steps):
-    if os.path.isfile(f"/dev/shm/{n}.pdb"):
-      os.remove(f"/dev/shm/{n}.pdb")
-
-  pid = run_command_and_get_pid(command)
-  try:
-    fail = False
-    for _ in range(num_designs):
-
-      # for each step check if output generated
-      for n in range(steps):
-        wait = True
-        while wait and not fail:
-          time.sleep(0.1)
-          if os.path.isfile(f"/dev/shm/{n}.pdb"):
-            pdb_str = open(f"/dev/shm/{n}.pdb").read()
-            if pdb_str[-3:] == "TER":
-              wait = False
-            elif not is_process_running(pid):
-              fail = True
-          elif not is_process_running(pid):
-            fail = True
-
-        if fail:
-          #progress.bar_style = 'danger'
-          #progress.description = "failed"
-          break
-
+    def is_process_running(pid):
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
         else:
-          #progress.value = (n+1) / steps
-          if visual != "none":
-            pass
-            #with run_output:
-            #  run_output.clear_output(wait=True)
-            #  if visual == "image":
-            #    xyz, bfact = get_ca(f"/dev/shm/{n}.pdb", get_bfact=True)
-            #    fig = plt.figure()
-            #    fig.set_dpi(100);fig.set_figwidth(6);fig.set_figheight(6)
-            #    ax1 = fig.add_subplot(111);ax1.set_xticks([]);ax1.set_yticks([])
-            #    plot_pseudo_3D(xyz, c=bfact, cmin=0.5, cmax=0.9, ax=ax1)
-            #    plt.show()
-            #  if visual == "interactive":
-            #    view = py3Dmol.view(js='https://3dmol.org/build/3Dmol.js')
-            #    view.addModel(pdb_str,'pdb')
-            #    view.setStyle({'cartoon': {'colorscheme': {'prop':'b','gradient': 'roygb','min':0.5,'max':0.9}}})
-            #    view.zoomTo()
-            #    view.show()
-        if os.path.exists(f"/dev/shm/{n}.pdb"):
-          os.remove(f"/dev/shm/{n}.pdb")
-      if fail:
+            return True
+
+    #run_output = widgets.Output()
+    #progress = widgets.FloatProgress(min=0, max=1, description='running', bar_style='info')
+    #display(widgets.VBox([progress, run_output]))
+
+    # clear previous run
+    for n in range(steps):
+        if os.path.isfile(f"/dev/shm/{n}.pdb"):
+            os.remove(f"/dev/shm/{n}.pdb")
+
+    pid = run_command_and_get_pid(command)
+    try:
+        fail = False
+        for _ in range(num_designs):
+
+            # for each step check if output generated
+            for n in range(steps):
+                wait = True
+                while wait and not fail:
+                    time.sleep(0.1)
+                    if os.path.isfile(f"/dev/shm/{n}.pdb"):
+                        pdb_str = open(f"/dev/shm/{n}.pdb").read()
+                        if pdb_str[-3:] == "TER":
+                            wait = False
+                        elif not is_process_running(pid):
+                            fail = True
+                    elif not is_process_running(pid):
+                        fail = True
+
+                if fail:
+                    #progress.bar_style = 'danger'
+                    #progress.description = "failed"
+                    break
+
+                else:
+                    #progress.value = (n+1) / steps
+                    if visual != "none":
+                        pass
+                        #with run_output:
+                        #    run_output.clear_output(wait=True)
+                        #    if visual == "image":
+                        #        xyz, bfact = get_ca(f"/dev/shm/{n}.pdb", get_bfact=True)
+                        #        fig = plt.figure()
+                        #        fig.set_dpi(100);fig.set_figwidth(6);fig.set_figheight(6)
+                        #        ax1 = fig.add_subplot(111);ax1.set_xticks([]);ax1.set_yticks([])
+                        #        plot_pseudo_3D(xyz, c=bfact, cmin=0.5, cmax=0.9, ax=ax1)
+                        #        plt.show()
+                        #    if visual == "interactive":
+                        #        view = py3Dmol.view(js='https://3dmol.org/build/3Dmol.js')
+                        #        view.addModel(pdb_str,'pdb')
+                        #        view.setStyle({'cartoon': {'colorscheme': {'prop':'b','gradient': 'roygb','min':0.5,'max':0.9}}})
+                        #        view.zoomTo()
+                        #        view.show()
+                if os.path.exists(f"/dev/shm/{n}.pdb"):
+                    os.remove(f"/dev/shm/{n}.pdb")
+            if fail:
+                #progress.bar_style = 'danger'
+                #progress.description = "failed"
+                break
+
+        while is_process_running(pid):
+            time.sleep(0.1)
+
+    except KeyboardInterrupt:
+        os.kill(pid, signal.SIGTERM)
         #progress.bar_style = 'danger'
-        #progress.description = "failed"
-        break
-
-    while is_process_running(pid):
-      time.sleep(0.1)
-
-  except KeyboardInterrupt:
-    os.kill(pid, signal.SIGTERM)
-    #progress.bar_style = 'danger'
-    #progress.description = "stopped"
+        #progress.description = "stopped"
 
 def run_diffusion(contigs, path, pdb=None, iterations=50,
                   symmetry="none", order=1, hotspot=None,
@@ -189,7 +190,7 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
   from colabdesign.shared.protein import pdb_to_string
   from colabdesign.shared.plot import plot_pseudo_3D
 
-  full_path = f"outputs/{path}"
+  full_path = f"{OUTPUT_ROOT}/{path}"
   os.makedirs(full_path, exist_ok=True)
   opts = [f"inference.output_prefix={full_path}",
           f"inference.num_designs={num_designs}"]
@@ -298,8 +299,8 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
 
   # fix pdbs
   for n in range(num_designs):
-    pdbs = [f"outputs/traj/{path}_{n}_pX0_traj.pdb",
-            f"outputs/traj/{path}_{n}_Xt-1_traj.pdb",
+    pdbs = [f"{OUTPUT_ROOT}/traj/{path}_{n}_pX0_traj.pdb",
+            f"{OUTPUT_ROOT}/traj/{path}_{n}_Xt-1_traj.pdb",
             f"{full_path}_{n}.pdb"]
     for pdb in pdbs:
       with open(pdb,"r") as handle: pdb_str = handle.read()
@@ -319,7 +320,7 @@ def designability_test():
     #@markdown - for **binder** design, we recommend `initial_guess=True num_recycles=3`
 
     if not os.path.isfile("params/done.txt"):
-        # ???????????????
+        # TEMPTEMP check this???????????????
         pass
 
     print("downloading AlphaFold params...")
@@ -327,8 +328,8 @@ def designability_test():
         time.sleep(5)
 
     contigs_str = ":".join(contigs)
-    opts = [f"--pdb=outputs/{path}_0.pdb",
-            f"--loc=outputs/{path}",
+    opts = [f"--pdb={OUTPUT_ROOT}/{path}_0.pdb",
+            f"--loc={OUTPUT_ROOT}/{path}",
             f"--contig={contigs_str}",
             f"--copies={copies}",
             f"--num_seqs={num_seqs}",
@@ -344,7 +345,7 @@ def designability_test():
 
 @stub.function(image=image, gpu="T4", timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def rfdiffusion() -> list[str, str]:
+def rfdiffusion() -> list[tuple[str, str]]:
     #input_fasta = Path(input_fasta)
     #assert input_fasta.parent.resolve() == Path(MODAL_IN).resolve(), f"wrong input_fasta dir {input_fasta.parent}"
     #assert input_fasta.suffix in (".faa", ".fasta"), f"not fasta file {input_fasta}"
@@ -374,7 +375,7 @@ def rfdiffusion() -> list[str, str]:
 
     # determine where to save
     path = name
-    while os.path.exists(f"outputs/{path}_0.pdb"):
+    while os.path.exists(f"{OUTPUT_ROOT}/{path}_0.pdb"):
         path = name + "_" + ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
 
     flags = {"contigs":contigs,
@@ -396,7 +397,7 @@ def rfdiffusion() -> list[str, str]:
     run_diffusion(**flags)
 
     return [(outfile, open(outfile, "rb").read())
-            for outfile in glob.glob(f"outputs/**/*.*", recursive=True)]
+            for outfile in glob.glob(f"{OUTPUT_ROOT}/**/*.*", recursive=True)]
 
 
 @stub.local_entrypoint()
