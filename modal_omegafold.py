@@ -6,8 +6,8 @@ from pathlib import Path
 from modal import Image, Mount, Stub
 
 FORCE_BUILD = False
-MODAL_IN = "./modal_in"
-MODAL_OUT = "./modal_out"
+MODAL_IN = "./modal_in/omegafold"
+MODAL_OUT = "./modal_out/omegafold"
 
 stub = Stub()
 
