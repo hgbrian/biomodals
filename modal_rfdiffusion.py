@@ -6,8 +6,8 @@ from pathlib import Path
 from modal import Image, Mount, Stub
 
 FORCE_BUILD = False
-MODAL_IN = "./modal_in"
-MODAL_OUT = "./modal_out"
+MODAL_IN = "./modal_in/rfdiffusion"
+MODAL_OUT = "./modal_out/rfdiffusion"
 OUTPUT_ROOT = "rfdiffusion"
 
 stub = Stub()
@@ -180,136 +180,145 @@ def run(command, steps, num_designs=1, visual="none"):
         #progress.description = "stopped"
 
 def run_diffusion(contigs, path, pdb=None, iterations=50,
-                  symmetry="none", order=1, hotspot=None,
-                  chains=None, add_potential=False,
-                  num_designs=1, visual="none"):
+                                    symmetry="none", order=1, hotspot=None,
+                                    chains=None, add_potential=False,
+                                    num_designs=1, visual="none"):
 
-  from inference.utils import parse_pdb
-  from colabdesign.rf.utils import get_ca
-  from colabdesign.rf.utils import fix_contigs, fix_partial_contigs, fix_pdb
-  from colabdesign.shared.protein import pdb_to_string
-  from colabdesign.shared.plot import plot_pseudo_3D
+    from inference.utils import parse_pdb
+    from colabdesign.rf.utils import get_ca
+    from colabdesign.rf.utils import fix_contigs, fix_partial_contigs, fix_pdb
+    from colabdesign.shared.protein import pdb_to_string
+    from colabdesign.shared.plot import plot_pseudo_3D
 
-  full_path = f"{OUTPUT_ROOT}/{path}"
-  os.makedirs(full_path, exist_ok=True)
-  opts = [f"inference.output_prefix={full_path}",
-          f"inference.num_designs={num_designs}"]
+    full_path = f"{OUTPUT_ROOT}/{path}"
+    os.makedirs(full_path, exist_ok=True)
 
-  if chains == "": chains = None
+    opts = [f"inference.output_prefix={full_path}",
+            f"inference.num_designs={num_designs}"]
 
-  # determine symmetry type
-  if symmetry in ["auto","cyclic","dihedral"]:
-    if symmetry == "auto":
-      sym, copies = None, 1
+    if chains == "":
+        chains = None
+
+    # determine symmetry type
+    if symmetry in ["auto", "cyclic", "dihedral"]:
+        if symmetry == "auto":
+            sym, copies = None, 1
+        else:
+            sym, copies = {"cyclic":(f"c{order}",order),
+                                     "dihedral":(f"d{order}",order*2)}[symmetry]
     else:
-      sym, copies = {"cyclic":(f"c{order}",order),
-                     "dihedral":(f"d{order}",order*2)}[symmetry]
-  else:
-    symmetry = None
-    sym, copies = None, 1
-
-  # determine mode
-  contigs = contigs.replace(","," ").replace(":"," ").split()
-  is_fixed, is_free = False, False
-  fixed_chains = []
-  for contig in contigs:
-    for x in contig.split("/"):
-      a = x.split("-")[0]
-      if a[0].isalpha():
-        is_fixed = True
-        if a[0] not in fixed_chains:
-          fixed_chains.append(a[0])
-      if a.isnumeric():
-        is_free = True
-  if len(contigs) == 0 or not is_free:
-    mode = "partial"
-  elif is_fixed:
-    mode = "fixed"
-  else:
-    mode = "free"
-
-  # fix input contigs
-  if mode in ["partial", "fixed"]:
-    pdb_str = pdb_to_string(get_pdb(pdb), chains=chains)
-    if symmetry == "auto":
-      a, pdb_str = run_ananas(pdb_str, path)
-      if a is None:
-        print(f'ERROR: no symmetry detected')
         symmetry = None
         sym, copies = None, 1
-      else:
-        if a["group"][0] == "c":
-          symmetry = "cyclic"
-          sym, copies = a["group"], int(a["group"][1:])
-        elif a["group"][0] == "d":
-          symmetry = "dihedral"
-          sym, copies = a["group"], 2 * int(a["group"][1:])
-        else:
-          print(f'ERROR: the detected symmetry ({a["group"]}) not currently supported')
-          symmetry = None
-          sym, copies = None, 1
 
-    elif mode == "fixed":
-      pdb_str = pdb_to_string(pdb_str, chains=fixed_chains)
+    #
+    # determine mode
+    #
+    contigs = contigs.replace(","," ").replace(":"," ").split()
+    is_fixed, is_free = False, False
+    fixed_chains = []
 
-    pdb_filename = f"{full_path}/input.pdb"
-    with open(pdb_filename, "w") as handle:
-      handle.write(pdb_str)
+    for contig in contigs:
+        for x in contig.split("/"):
+            a = x.split("-")[0]
+            if a[0].isalpha():
+                is_fixed = True
+                if a[0] not in fixed_chains:
+                    fixed_chains.append(a[0])
+            if a.isnumeric():
+                is_free = True
 
-    parsed_pdb = parse_pdb(pdb_filename)
-    opts.append(f"inference.input_pdb={pdb_filename}")
-    if mode in ["partial"]:
-      iterations = int(80 * (iterations / 200))
-      opts.append(f"diffuser.partial_T={iterations}")
-      contigs = fix_partial_contigs(contigs, parsed_pdb)
+    if len(contigs) == 0 or not is_free:
+        mode = "partial"
+    elif is_fixed:
+        mode = "fixed"
     else:
-      opts.append(f"diffuser.T={iterations}")
-      contigs = fix_contigs(contigs, parsed_pdb)
-  else:
-    opts.append(f"diffuser.T={iterations}")
-    parsed_pdb = None
-    contigs = fix_contigs(contigs, parsed_pdb)
+        mode = "free"
 
-  if hotspot is not None and hotspot != "":
-    opts.append(f"ppi.hotspot_res=[{hotspot}]")
+    #
+    # fix input contigs
+    #
+    if mode in ["partial", "fixed"]:
+        pdb_str = pdb_to_string(get_pdb(pdb), chains=chains)
+        if symmetry == "auto":
+            a, pdb_str = run_ananas(pdb_str, path)
+            if a is None:
+                print(f'ERROR: no symmetry detected')
+                symmetry = None
+                sym, copies = None, 1
+            else:
+                if a["group"][0] == "c":
+                    symmetry = "cyclic"
+                    sym, copies = a["group"], int(a["group"][1:])
+                elif a["group"][0] == "d":
+                    symmetry = "dihedral"
+                    sym, copies = a["group"], 2 * int(a["group"][1:])
+                else:
+                    print(f'ERROR: the detected symmetry ({a["group"]}) not currently supported')
+                    symmetry = None
+                    sym, copies = None, 1
 
-  # setup symmetry
-  if sym is not None:
-    sym_opts = ["--config-name symmetry", f"inference.symmetry={sym}"]
-    if add_potential:
-      sym_opts += ["'potentials.guiding_potentials=[\"type:olig_contacts,weight_intra:1,weight_inter:0.1\"]'",
-                   "potentials.olig_intra_all=True","potentials.olig_inter_all=True",
-                   "potentials.guide_scale=2","potentials.guide_decay=quadratic"]
-    opts = sym_opts + opts
-    contigs = sum([contigs] * copies,[])
+        elif mode == "fixed":
+            pdb_str = pdb_to_string(pdb_str, chains=fixed_chains)
 
-  opts.append(f"'contigmap.contigs=[{' '.join(contigs)}]'")
-  opts += ["inference.dump_pdb=True","inference.dump_pdb_path='/dev/shm'"]
+        pdb_filename = f"{full_path}/input.pdb"
+        with open(pdb_filename, "w") as handle:
+            handle.write(pdb_str)
 
-  print("mode:", mode)
-  print("output:", full_path)
-  print("contigs:", contigs)
+        parsed_pdb = parse_pdb(pdb_filename)
+        opts.append(f"inference.input_pdb={pdb_filename}")
+        if mode in ["partial"]:
+            iterations = int(80 * (iterations / 200))
+            opts.append(f"diffuser.partial_T={iterations}")
+            contigs = fix_partial_contigs(contigs, parsed_pdb)
+        else:
+            opts.append(f"diffuser.T={iterations}")
+            contigs = fix_contigs(contigs, parsed_pdb)
+    else:
+        opts.append(f"diffuser.T={iterations}")
+        parsed_pdb = None
+        contigs = fix_contigs(contigs, parsed_pdb)
 
-  opts_str = " ".join(opts)
-  cmd = f"./run_inference.py {opts_str}"
-  print(cmd)
+    if hotspot is not None and hotspot != "":
+        opts.append(f"ppi.hotspot_res=[{hotspot}]")
 
-  # RUN
-  run(cmd, iterations, num_designs, visual=visual)
+    # setup symmetry
+    if sym is not None:
+        sym_opts = ["--config-name symmetry", f"inference.symmetry={sym}"]
+        if add_potential:
+            sym_opts += ["'potentials.guiding_potentials=[\"type:olig_contacts,weight_intra:1,weight_inter:0.1\"]'",
+                                     "potentials.olig_intra_all=True","potentials.olig_inter_all=True",
+                                     "potentials.guide_scale=2","potentials.guide_decay=quadratic"]
+        opts = sym_opts + opts
+        contigs = sum([contigs] * copies,[])
 
-  # fix pdbs
-  for n in range(num_designs):
-    pdbs = [f"{OUTPUT_ROOT}/traj/{path}_{n}_pX0_traj.pdb",
-            f"{OUTPUT_ROOT}/traj/{path}_{n}_Xt-1_traj.pdb",
-            f"{full_path}_{n}.pdb"]
-    for pdb in pdbs:
-      with open(pdb,"r") as handle: pdb_str = handle.read()
-      with open(pdb,"w") as handle: handle.write(fix_pdb(pdb_str, contigs))
+    opts.append(f"'contigmap.contigs=[{' '.join(contigs)}]'")
+    opts += ["inference.dump_pdb=True","inference.dump_pdb_path='/dev/shm'"]
 
-  return contigs, copies
+    print("mode:", mode)
+    print("output:", full_path)
+    print("contigs:", contigs)
+
+    opts_str = " ".join(opts)
+    cmd = f"./run_inference.py {opts_str}"
+    print(cmd)
+
+    # RUN
+    run(cmd, iterations, num_designs, visual=visual)
+
+    # fix pdbs
+    for n in range(num_designs):
+        pdbs = [f"{OUTPUT_ROOT}/traj/{path}_{n}_pX0_traj.pdb",
+                        f"{OUTPUT_ROOT}/traj/{path}_{n}_Xt-1_traj.pdb",
+                        f"{full_path}_{n}.pdb"]
+        for pdb in pdbs:
+            with open(pdb,"r") as handle: pdb_str = handle.read()
+            with open(pdb,"w") as handle: handle.write(fix_pdb(pdb_str, contigs))
+
+    return contigs, copies
 
 
 def designability_test():
+    """FIXFIX not in"""
     #@title run **ProteinMPNN** to generate a sequence and **AlphaFold** to validate
     num_seqs = 8 #@param ["1", "2", "4", "8", "16", "32", "64"] {type:"raw"}
     initial_guess = False #@param {type:"boolean"}
@@ -345,7 +354,7 @@ def designability_test():
 
 @stub.function(image=image, gpu="T4", timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def rfdiffusion() -> list[tuple[str, str]]:
+def rfdiffusion(pdb:str, contigs:str, run_name:str) -> list[tuple[str, str]]:
     #input_fasta = Path(input_fasta)
     #assert input_fasta.parent.resolve() == Path(MODAL_IN).resolve(), f"wrong input_fasta dir {input_fasta.parent}"
     #assert input_fasta.suffix in (".faa", ".fasta"), f"not fasta file {input_fasta}"
@@ -355,9 +364,9 @@ def rfdiffusion() -> list[tuple[str, str]]:
 
     import random, string
 
-    name = "test" #@param {type:"string"}
-    contigs = "100" #@param {type:"string"}
-    pdb = "/in/GPX4_HX1393.fasta" #@param {type:"string"}
+    name = run_name or Path(pdb).stem #@param {type:"string"}
+    #contigs = contigs #@param {type:"string"}
+    #pdb = "/in/GPX4_HX1393.fasta" #@param {type:"string"}
     iterations = 25 #@param ["25", "50", "100", "150", "200"] {type:"raw"}
     hotspot = "" #@param {type:"string"}
     num_designs = 1 #@param ["1", "2", "4", "8", "16", "32"] {type:"raw"}
@@ -401,8 +410,8 @@ def rfdiffusion() -> list[tuple[str, str]]:
 
 
 @stub.local_entrypoint()
-def main():
-    outputs = rfdiffusion.remote()
+def main(pdb:str, contigs:str="100", run_name:str=''):
+    outputs = rfdiffusion.remote(pdb, contigs, run_name)
 
     for (out_file, out_content) in outputs:
         out_path = (Path(MODAL_OUT) / out_file)
