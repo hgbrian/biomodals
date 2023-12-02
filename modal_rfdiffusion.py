@@ -93,7 +93,7 @@ def run_ananas(pdb_str, path, sym=None):
     except:
         return None, pdb_str
 
-def run(command, steps, num_designs=1, visual="none"):
+def run_inference(command, steps, num_designs=1, visual="none"):
     import os, time, signal
     
     def run_command_and_get_pid(command):
@@ -111,10 +111,6 @@ def run(command, steps, num_designs=1, visual="none"):
             return False
         else:
             return True
-
-    #run_output = widgets.Output()
-    #progress = widgets.FloatProgress(min=0, max=1, description='running', bar_style='info')
-    #display(widgets.VBox([progress, run_output]))
 
     # clear previous run
     for n in range(steps):
@@ -141,12 +137,9 @@ def run(command, steps, num_designs=1, visual="none"):
                         fail = True
 
                 if fail:
-                    #progress.bar_style = 'danger'
-                    #progress.description = "failed"
                     break
 
                 else:
-                    #progress.value = (n+1) / steps
                     if visual != "none":
                         pass
                         #with run_output:
@@ -167,8 +160,6 @@ def run(command, steps, num_designs=1, visual="none"):
                 if os.path.exists(f"/dev/shm/{n}.pdb"):
                     os.remove(f"/dev/shm/{n}.pdb")
             if fail:
-                #progress.bar_style = 'danger'
-                #progress.description = "failed"
                 break
 
         while is_process_running(pid):
@@ -176,8 +167,7 @@ def run(command, steps, num_designs=1, visual="none"):
 
     except KeyboardInterrupt:
         os.kill(pid, signal.SIGTERM)
-        #progress.bar_style = 'danger'
-        #progress.description = "stopped"
+
 
 def run_diffusion(contigs, path, pdb=None, iterations=50,
                                     symmetry="none", order=1, hotspot=None,
@@ -303,7 +293,7 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
     print(cmd)
 
     # RUN
-    run(cmd, iterations, num_designs, visual=visual)
+    run_inference(cmd, iterations, num_designs, visual=visual)
 
     # fix pdbs
     for n in range(num_designs):
@@ -354,14 +344,7 @@ def designability_test():
 
 @stub.function(image=image, gpu="T4", timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def rfdiffusion(pdb:str, contigs:str, run_name:str) -> list[tuple[str, str]]:
-    #input_fasta = Path(input_fasta)
-    #assert input_fasta.parent.resolve() == Path(MODAL_IN).resolve(), f"wrong input_fasta dir {input_fasta.parent}"
-    #assert input_fasta.suffix in (".faa", ".fasta"), f"not fasta file {input_fasta}"
-
-    #run(["mkdir", "-p", MODAL_OUT], check=True)
-    #run(["omegafold", "--model", "2", f"/in/{input_fasta.name}", MODAL_OUT], check=True)
-
+def rfdiffusion(pdb:str, contigs:str, run_name:str, iterations:int) -> list[tuple[str, str]]:
     import random, string
 
     name = run_name or Path(pdb).stem #@param {type:"string"}
@@ -410,8 +393,8 @@ def rfdiffusion(pdb:str, contigs:str, run_name:str) -> list[tuple[str, str]]:
 
 
 @stub.local_entrypoint()
-def main(pdb:str, contigs:str="100", run_name:str=''):
-    outputs = rfdiffusion.remote(pdb, contigs, run_name)
+def main(pdb:str, contigs:str="100", run_name:str='', iterations:int=25):
+    outputs = rfdiffusion.remote(pdb, contigs, run_name, iterations)
 
     for (out_file, out_content) in outputs:
         out_path = (Path(MODAL_OUT) / out_file)
