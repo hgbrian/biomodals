@@ -1,3 +1,32 @@
+"""
+# Instructions
+Use contigs to define continious chains.
+Use a : to define multiple contigs and a / to define mutliple segments within a contig.
+For example:
+
+## unconditional
+contigs='100' - diffuse monomer of length 100
+contigs='50:100' - diffuse hetero-oligomer of lengths 50 and 100
+contigs='50' symmetry='cyclic' order=2 - make two copies of the defined contig(s) and add a symmetry constraint, for homo-oligomeric diffusion.
+
+## binder design
+contigs='A:50' pdb='4N5T' - diffuse a binder of length 50 to chain A of defined PDB.
+contigs='E6-155:70-100' pdb='5KQV' hotspot='E64,E88,E96' - diffuse a binder of length 70 to 100 (sampled randomly) to chain E and defined hotspot(s).
+
+## motif scaffolding
+contigs='40/A163-181/40' pdb='5TPN'
+contigs='A3-30/36/A33-68' pdb='6MRR' - diffuse a loop of length 36 between two segments of defined PDB ranges.
+
+## partial diffusion
+contigs='' pdb='6MRR' - noise all coordinates
+contigs='A1-10' pdb='6MRR' - keep first 10 positions fixed, noise the rest
+contigs='A' pdb='1SSC' - fix chain A, noise the rest
+
+## hints and tips
+pdb='' leave blank to get an upload prompt
+contigs='50-100' use dash to specify a range of lengths to sample from
+"""
+
 import glob
 
 from subprocess import run
@@ -46,9 +75,14 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-def get_pdb(pdb_code=None):
+
+def get_pdb(pdb_code_or_file=None):
     """FIXFIX stub"""
-    return pdb_code
+    if pdb_code_or_file.endswith(".pdb"):
+        return pdb_code_or_file
+    else:
+        raise NotImplementedError("pdb_code_or_file must be a PDB file")
+
 
 def run_ananas(pdb_str, path, sym=None):
     """AnAnaS : software for analytical analysis of symmetries in protein structures
@@ -96,6 +130,7 @@ def run_ananas(pdb_str, path, sym=None):
 
     except:
         return None, pdb_str
+
 
 def run_inference(command, steps, num_designs=1, visual="none"):
     import os, time, signal
@@ -172,6 +207,7 @@ def run_inference(command, steps, num_designs=1, visual="none"):
     except KeyboardInterrupt:
         os.kill(pid, signal.SIGTERM)
 
+
 def run_diffusion(contigs, path, pdb=None, iterations=50,
                   symmetry="none", order=1, hotspot=None,
                   chains=None, add_potential=False,
@@ -232,6 +268,7 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
     #
     if mode in ["partial", "fixed"]:
         pdb_str = pdb_to_string(get_pdb(pdb), chains=chains)
+        print("pdb_str:", pdb_str[:1000])
         if symmetry == "auto":
             a, pdb_str = run_ananas(pdb_str, path)
             if a is None:
@@ -267,6 +304,7 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
             opts.append(f"diffuser.T={iterations}")
             contigs = fix_contigs(contigs, parsed_pdb)
     else:
+        assert mode == "free"
         opts.append(f"diffuser.T={iterations}")
         parsed_pdb = None
         contigs = fix_contigs(contigs, parsed_pdb)
@@ -279,8 +317,8 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
         sym_opts = ["--config-name symmetry", f"inference.symmetry={sym}"]
         if add_potential:
             sym_opts += ["'potentials.guiding_potentials=[\"type:olig_contacts,weight_intra:1,weight_inter:0.1\"]'",
-                                     "potentials.olig_intra_all=True","potentials.olig_inter_all=True",
-                                     "potentials.guide_scale=2","potentials.guide_decay=quadratic"]
+                         "potentials.olig_intra_all=True","potentials.olig_inter_all=True",
+                         "potentials.guide_scale=2","potentials.guide_decay=quadratic"]
         opts = sym_opts + opts
         contigs = sum([contigs] * copies,[])
 
@@ -298,11 +336,11 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
     # RUN
     run_inference(cmd, iterations, num_designs, visual=visual)
 
-    # fix pdbs
+    # Fix pdbs
     for n in range(num_designs):
         pdbs = [f"{OUTPUT_ROOT}/traj/{path}_{n}_pX0_traj.pdb",
-                        f"{OUTPUT_ROOT}/traj/{path}_{n}_Xt-1_traj.pdb",
-                        f"{full_path}_{n}.pdb"]
+                f"{OUTPUT_ROOT}/traj/{path}_{n}_Xt-1_traj.pdb",
+                f"{full_path}_{n}.pdb"]
         for pdb in pdbs:
             with open(pdb,"r") as handle: pdb_str = handle.read()
             with open(pdb,"w") as handle: handle.write(fix_pdb(pdb_str, contigs))
@@ -312,6 +350,8 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
 
 def designability_test():
     """FIXFIX not in"""
+    # Do this after "run_diffusion"
+
     #@title run **ProteinMPNN** to generate a sequence and **AlphaFold** to validate
     num_seqs = 8 #@param ["1", "2", "4", "8", "16", "32", "64"] {type:"raw"}
     initial_guess = False #@param {type:"boolean"}
@@ -390,6 +430,8 @@ def rfdiffusion(pdb:str, contigs:str, run_name:str, iterations:int) -> list[tupl
             flags[k] = v.replace("'","").replace('"','')
 
     run_diffusion(**flags)
+
+    # designability test here
 
     return [(outfile, open(outfile, "rb").read())
             for outfile in glob.glob(f"{OUTPUT_ROOT}/**/*.*", recursive=True)]
