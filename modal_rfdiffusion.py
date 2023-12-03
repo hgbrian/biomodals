@@ -72,6 +72,10 @@ image = (Image
 # ColabDesign imports
 import os
 import json
+import random
+import signal
+import string
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -81,7 +85,7 @@ def get_pdb(pdb_code_or_file=None):
     if pdb_code_or_file.endswith(".pdb"):
         return pdb_code_or_file
     else:
-        raise NotImplementedError("pdb_code_or_file must be a PDB file")
+        raise NotImplementedError(f"pdb_code_or_file {pdb_code_or_file} must be a PDB file")
 
 
 def run_ananas(pdb_str, path, sym=None):
@@ -133,8 +137,7 @@ def run_ananas(pdb_str, path, sym=None):
 
 
 def run_inference(command, steps, num_designs=1, visual="none"):
-    import os, time, signal
-    
+
     def run_command_and_get_pid(command):
         pid_file = '/dev/shm/pid'
         os.system(f'nohup {command} > /dev/null & echo $! > {pid_file}')
@@ -333,7 +336,7 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
     cmd = f"./run_inference.py {opts_str}"
     print(cmd)
 
-    # RUN
+    # inference step
     run_inference(cmd, iterations, num_designs, visual=visual)
 
     # Fix pdbs
@@ -348,21 +351,27 @@ def run_diffusion(contigs, path, pdb=None, iterations=50,
     return contigs, copies
 
 
-def designability_test():
-    """FIXFIX not in"""
-    # Do this after "run_diffusion"
-
+def designability_test(contigs, path, copies, num_designs,
+                       num_seqs:int=8,
+                       initial_guess:bool=False,
+                       num_recycles:int=1,
+                       use_multimer:bool=False,
+                       rm_aa:str="",
+                       mpnn_sampling_temp:float=0.1):
+    """run ProteinMPNN to generate a sequence and AlphaFold to validate
+    @markdown - for **binder** design, we recommend `initial_guess=True num_recycles=3`
+    """
     #@title run **ProteinMPNN** to generate a sequence and **AlphaFold** to validate
-    num_seqs = 8 #@param ["1", "2", "4", "8", "16", "32", "64"] {type:"raw"}
-    initial_guess = False #@param {type:"boolean"}
-    num_recycles = 1 #@param ["0", "1", "2", "3", "6", "12"] {type:"raw"}
-    use_multimer = False #@param {type:"boolean"}
-    rm_aa = "C" #@param {type:"string"}
-    mpnn_sampling_temp = 0.1 #@param ["0.0001", "0.1", "0.15", "0.2", "0.25", "0.3", "0.5", "1.0"] {type:"raw"}
+    #num_seqs = 8 #@param ["1", "2", "4", "8", "16", "32", "64"] {type:"raw"}
+    #initial_guess = False #@param {type:"boolean"}
+    #num_recycles = 1 #@param ["0", "1", "2", "3", "6", "12"] {type:"raw"}
+    #use_multimer = False #@param {type:"boolean"}
+    #rm_aa = "C" #@param {type:"string"}
+    #mpnn_sampling_temp = 0.1 #@param ["0.0001", "0.1", "0.15", "0.2", "0.25", "0.3", "0.5", "1.0"] {type:"raw"}
     #@markdown - for **binder** design, we recommend `initial_guess=True num_recycles=3`
 
     if not os.path.isfile("params/done.txt"):
-        # TEMPTEMP check this???????????????
+        # TEMPTEMP checks for alphafold download so skippable
         pass
 
     print("downloading AlphaFold params...")
@@ -387,23 +396,31 @@ def designability_test():
 
 @stub.function(image=image, gpu="T4", timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def rfdiffusion(pdb:str, contigs:str, run_name:str, iterations:int) -> list[tuple[str, str]]:
-    import random, string
+def rfdiffusion(contigs:str, pdb:str,
+                iterations:int=25,
+                hotspot:str="",
+                num_designs:int=1,
+                visual:str="image",
+                symmetry:str="none",
+                order:int=1,
+                chains:str="",
+                add_potential:bool=True,
+                name:str=None) -> list[tuple[str, str]]:
 
-    name = run_name or Path(pdb).stem #@param {type:"string"}
+    name = name or Path(pdb).stem #@param {type:"string"}
     #contigs = contigs #@param {type:"string"}
     #pdb = "/in/GPX4_HX1393.fasta" #@param {type:"string"}
-    iterations = 25 #@param ["25", "50", "100", "150", "200"] {type:"raw"}
-    hotspot = "" #@param {type:"string"}
-    num_designs = 1 #@param ["1", "2", "4", "8", "16", "32"] {type:"raw"}
-    visual = "image" #@param ["none", "image", "interactive"]
+    #iterations = 25 #@param ["25", "50", "100", "150", "200"] {type:"raw"}
+    #hotspot = "" #@param {type:"string"}
+    #num_designs = 1 #@param ["1", "2", "4", "8", "16", "32"] {type:"raw"}
+    #visual = "image" #@param ["none", "image", "interactive"]
     #@markdown ---
     #@markdown **symmetry** settings
     #@markdown ---
-    symmetry = "none" #@param ["none", "auto", "cyclic", "dihedral"]
-    order = 1 #@param ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] {type:"raw"}
-    chains = "" #@param {type:"string"}
-    add_potential = True #@param {type:"boolean"}
+    #symmetry = "none" #@param ["none", "auto", "cyclic", "dihedral"]
+    #order = 1 #@param ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] {type:"raw"}
+    #chains = "" #@param {type:"string"}
+    #add_potential = True #@param {type:"boolean"}
     #@markdown - `symmetry='auto'` enables automatic symmetry dectection with [AnAnaS](https://team.inria.fr/nano-d/software/ananas/).
     #@markdown - `chains="A,B"` filter PDB input to these chains (may help auto-symm detector)
     #@markdown - `add_potential` to discourage clashes between chains
@@ -438,8 +455,8 @@ def rfdiffusion(pdb:str, contigs:str, run_name:str, iterations:int) -> list[tupl
 
 
 @stub.local_entrypoint()
-def main(pdb:str, contigs:str="100", run_name:str='', iterations:int=25):
-    outputs = rfdiffusion.remote(pdb, contigs, run_name, iterations)
+def main(pdb:str, contigs:str="100", name:str='', iterations:int=25):
+    outputs = rfdiffusion.remote(contigs, pdb, iterations=iterations, name=name)
 
     for (out_file, out_content) in outputs:
         out_path = (Path(MODAL_OUT) / out_file)
