@@ -80,12 +80,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def get_pdb(pdb_code_or_file=None):
-    """FIXFIX stub"""
-    if pdb_code_or_file.endswith(".pdb"):
-        return pdb_code_or_file
-    else:
-        raise NotImplementedError(f"pdb_code_or_file {pdb_code_or_file} must be a PDB file")
+def get_pdb(pdb_code):
+  if os.path.isfile(pdb_code):
+    return pdb_code
+  elif len(pdb_code) == 4:
+    if not os.path.isfile(f"{pdb_code}.pdb1"):
+      os.system(f"wget -qnc https://files.rcsb.org/download/{pdb_code}.pdb1.gz")
+      os.system(f"gunzip {pdb_code}.pdb1.gz")
+    return f"{pdb_code}.pdb1"
+  else:
+    os.system(f"wget -qnc https://alphafold.ebi.ac.uk/files/AF-{pdb_code}-F1-model_v3.pdb")
+    return f"AF-{pdb_code}-F1-model_v3.pdb"
 
 
 def run_ananas(pdb_str, path, sym=None):
@@ -455,7 +460,8 @@ def rfdiffusion(contigs:str, pdb:str,
 
 
 @stub.local_entrypoint()
-def main(pdb:str, contigs:str="100", name:str='', iterations:int=25):
+def main(pdb:str, contigs:str,
+         name:str='', iterations:int=25):
     outputs = rfdiffusion.remote(contigs, pdb, iterations=iterations, name=name)
 
     for (out_file, out_content) in outputs:
