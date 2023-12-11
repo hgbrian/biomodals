@@ -21,3 +21,9 @@ Runs `minimap2 -ax sr <fasta> <reads>`
 ```
 modal run modal_minimap2.py --input-fasta modal_in/minimap2/mito.fasta --input-reads modal_in/minimap2/reads.fastq
 ```
+
+## AFDesign
+
+```
+modal run modal_afdesign.py --pdb 4MZK --target-chain A
+```
