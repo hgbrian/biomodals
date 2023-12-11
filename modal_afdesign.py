@@ -30,10 +30,9 @@ stub = Stub()
 image = (Image
          .debian_slim()
          #.from_registry("nvidia/cuda:12.3.1-runtime-ubuntu22.04", add_python="3.10")
-         .apt_install("git", "wget", "aria2")
+         .apt_install("git", "wget", "aria2", "ffmpeg")
          .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
-         .pip_install("pdb-tools==2.4.8")
-         .pip_install("plotly==5.18.0", "kaleido==v0.2.1")
+         .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==v0.2.1")
          .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
          .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
                        "mkdir /params")
@@ -398,7 +397,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:b
                    color=color, color_HP=color_HP, animate=animate)
 
     # takes 30s+
-    #HTML(model.animate(dpi=100))
+    html_content = model.animate(dpi=100)
 
     out_name = f"{model.protocol}_{pdb}_{target_chain}_{model.get_seqs()[0]}_{round(model.get_loss()[-1], 2)}"
     model.save_pdb(f"{out_name}.pdb")
@@ -432,19 +431,26 @@ def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:b
       fig.update_xaxes(side="top")
       fig.write_image(f"{out_name}.png")
 
-    # logged info?
+    # plddt etc in here
     log = model._tmp["best"]["aux"]["log"]
 
     return [(f"{out_name}.log", str(log).encode("utf-8")),
+            (f"{out_name}.html", html_content.encode("utf-8")),
             (f"{out_name}.pdb", open(f"{out_name}.pdb", "rb").read()),
             (f"{out_name}.png", open(f"{out_name}.png", "rb").read())]
 
 
 @stub.local_entrypoint()
-def main(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:bool=True):
+def main(pdb:str, target_chain:str,
+         target_hotspot:str="",
+         target_flexible:bool=True,
+         binder_len:int=20,
+         is_cyclic:bool=True,
+         soft_iters:int=30,
+         hard_iters:int=6):
     outputs = afdesign.remote(pdb, target_chain, target_hotspot, target_flexible,
-                              binder_len=12, is_cyclic=True,
-                              soft_iters=30, hard_iters=6)
+                              binder_len=binder_len, is_cyclic=is_cyclic,
+                              soft_iters=soft_iters, hard_iters=hard_iters)
 
     for (out_file, out_content) in outputs:
         out_path = Path(MODAL_OUT) / out_file
