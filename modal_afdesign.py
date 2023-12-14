@@ -21,8 +21,8 @@ from modal import Image, Mount, Stub
 from pathlib import Path
 
 FORCE_BUILD = False
-MODAL_IN = "./modal_in/afdesign"
-MODAL_OUT = "./modal_out/afdesign"
+MODAL_IN = "modal_in/afdesign"
+MODAL_OUT = "modal_out/afdesign"
 OUTPUT_ROOT = "afdesign"
 
 stub = Stub()
@@ -65,8 +65,8 @@ from scipy.special import softmax
 # ------------------------------------------------------------------------------
 #
 def get_pdb(pdb_code, biological_assembly=False, pdb_redo=False):
-    if Path(pdb_code).is_file():
-        return pdb_code
+    if (Path("/in") / Path(pdb_code).name).is_file():
+        return str(Path("/in") / Path(pdb_code).name)
     elif len(pdb_code) == 4:
         if pdb_redo:
             os.system(f"wget -qnc https://pdb-redo.eu/db/{pdb_code}/{pdb_code}_final.pdb")
@@ -145,11 +145,11 @@ def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
 # ------------------------------------------------------------------------------
 # BN added this merging tool
 #
-def join_chains_to_A_chain(pdb_file, chains):
+def join_chains(pdb_file, target_chain, merge_chains):
     """use pdb-tools to combine the pdb file into one chain"""
     with NamedTemporaryFile(suffix=".pdb", delete=False) as tf:
-        subprocess.run(f"pdb_selchain -{','.join(chains)} {pdb_file} | "
-                       f"pdb_chain -A | pdb_reres -1 > {tf.name}", shell=True, check=True)
+        subprocess.run(f"pdb_selchain -{','.join(merge_chains)} {pdb_file} | "
+                       f"pdb_chain -{target_chain} | pdb_reres -1 > {tf.name}", shell=True, check=True)
         return tf.name
 
 # ------------------------------------------------------------------------------
@@ -186,61 +186,64 @@ def MAYBE_get_nearby_residues(pdb_file, ligand_id, distance=8.0):
 #!pdb_selres # -100:200 5WKC.pdb
 
 # Testing something
-#merged_pdb = join_chains_to_A_chain(get_pdb("5wkc"), ["A", "D"])
+#merged_pdb = join_chains(get_pdb("5wkc"), ["A", "D"])
 #print(merged_pdb)
 
 # ------------------------------------------------------------------------------
 # prep inputs
 #
 
-@stub.function(image=image, gpu="l4", timeout=60*120,
+@stub.function(image=image, gpu="a100", timeout=60*120,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:bool=True,
-             binder_len:int=30, binder_seq:str="", binder_chain:str="",
-             is_cyclic:bool=False,
-             soft_iters=120, hard_iters=32):
+def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:bool=True,
+             binder_len:int=30, binder_seq=None, binder_chain=None,
+             make_cyclic:bool=False,
+             use_multimer:bool = False,
+             num_recycles:int = 3,
+             num_models = 2,
+             pdb_redo:bool=True,
+             soft_iters:int=120,
+             hard_iters:int=32):
+    """
+    pdb: enter PDB code or UniProt code (to fetch AlphaFoldDB model) or leave blink to upload your own
+    target_chain: chain to design binder against
+    target_hotspot: restrict loss to predefined positions on target (eg. "1-10,12,15")
+    target_flexible: allow backbone of target structure to be flexible
 
-    #@markdown ---
-    #@markdown **target info**
-    #@markdown - enter PDB code or UniProt code (to fetch AlphaFoldDB model) or leave blink to upload your own
-    #target_chain = "B" #@param {type:"string"}
-    #target_hotspot = "423" #@param {type:"string"}
-    if target_hotspot == "": target_hotspot = None
-    #@markdown - restrict loss to predefined positions on target (eg. "1-10,12,15")
-    #target_flexible = True #@param {type:"boolean"}
-    #@markdown - allow backbone of target structure to be flexible
+    binder_len: length of binder to hallucination
+    binder_seq: if defined, will initialize design with this sequence
+    binder_chain: if defined, supervised loss is used (binder_len is ignored).
+                  Set it to the chain of the binder in the PDB file?
 
-    # **binder info**
-    #binder_len:int = 50 #@param {type:"integer"}
-    #@markdown - length of binder to hallucination
+    make_cyclic: enforce cyclic peptide
 
-    #binder_seq:str = "" #@param {type:"string"}
+    use_multimer: use alphafold-multimer for design
+    num_recycles: #@param ["0", "1", "3", "6"] {type:"raw"}
+    num_models: number of trained models to use during optimization  #@param ["1", "2", "3", "4", "5", "all"]
 
-    if len(binder_seq) > 0:
+    soft_iters: number of iterations for soft optimization
+    hard_iters: number of iterations for hard optimization
+
+    """
+
+    merge_chains = None
+    if len(target_chain) > 1:
+        print("merging chains", target_chain)
+        merge_chains = list(target_chain)
+        target_chain = target_chain[0]
+
+    if binder_seq is not None:
         binder_seq = re.sub("[^A-Z]", "", binder_seq.upper())
         binder_len = len(binder_seq)
-    else:
-        binder_seq = None
-    #@markdown - if defined, will initialize design with this sequence
+    print("binder_seq:", binder_seq, "bind_len:", binder_len)
+    assert binder_len > 0, "binder_len must be > 0"
 
-    #binder_chain = "" #@param {type:"string"}
-    if binder_chain == "": binder_chain = None
-    #@markdown - if defined, supervised loss is used (binder_len is ignored)
-
-    #@markdown ---
-    #@markdown **model config**
-    use_multimer:bool = False #@param {type:"boolean"}
-    #@markdown - use alphafold-multimer for design
-    num_recycles:int = 3 #@param ["0", "1", "3", "6"] {type:"raw"}
-    num_models:str = "2" #@param ["1", "2", "3", "4", "5", "all"]
-    num_models:int = 5 if num_models == "all" else int(num_models)
-    #@markdown - number of trained models to use during optimization
+    num_models = 5 if num_models == "all" else int(num_models)
 
     # BN params
     ADD_CYSTEINES:bool = False
     ADD_FOLLISTATIN_MOTIF:bool = False
     ADD_P:bool = False
-    ADD_CYCLIC:bool = False
 
     x = {"pdb_filename":pdb,
          "chain":target_chain,
@@ -253,18 +256,9 @@ def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:b
     # ------------------------------------------------------------------------------
     # BN added this to extract only chains A and B
     #
-    if pdb == "3HH2":
-        _temp_pdb_file = join_chains_to_A_chain(get_pdb(x["pdb_filename"],
-                                                        pdb_redo=True), ["A", "B"])
-    elif pdb == "5JHW":
-        _temp_pdb_file = join_chains_to_A_chain(get_pdb(x["pdb_filename"],
-                                                        pdb_redo=False), ["A", "B"])
-    elif pdb == "3SEK":
-        _temp_pdb_file = get_pdb(x["pdb_filename"], biological_assembly=True)
-    elif pdb == "5WKC":
-        _temp_pdb_file = join_chains_to_A_chain(get_pdb(x["pdb_filename"]), ["A", "D"])
-    else:
-        _temp_pdb_file = get_pdb(x["pdb_filename"])
+    _temp_pdb_file = get_pdb(x["pdb_filename"], pdb_redo=pdb_redo)
+    if merge_chains is not None:
+        _temp_pdb_file = join_chains(_temp_pdb_file, target_chain, merge_chains)
     x["pdb_filename"] = _temp_pdb_file
 
     # ------------------------------------------------------------------------------
@@ -305,7 +299,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:b
                                   )
         model.prep_inputs(**x, ignore_missing=False)
         # BN make cyclic peptide
-        if is_cyclic:
+        if make_cyclic:
             add_cyclic_offset(model)
 
         x_prev = copy_dict(x)
@@ -399,7 +393,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:b
     # takes 30s+
     html_content = model.animate(dpi=100)
 
-    out_name = f"{model.protocol}_{pdb}_{target_chain}_{model.get_seqs()[0]}_{round(model.get_loss()[-1], 2)}"
+    out_name = f"{model.protocol}_{Path(pdb).stem}_{target_chain}_{model.get_seqs()[0]}_{round(model.get_loss()[-1], 2)}"
     model.save_pdb(f"{out_name}.pdb")
 
     # ------------------------------------------------------------------------------
@@ -442,14 +436,19 @@ def afdesign(pdb:str, target_chain:str, target_hotspot:str="", target_flexible:b
 
 @stub.local_entrypoint()
 def main(pdb:str, target_chain:str,
-         target_hotspot:str="",
+         target_hotspot=None,
          target_flexible:bool=True,
-         binder_len:int=20,
-         is_cyclic:bool=True,
+         binder_len=12,
+         binder_seq=None,
+         make_cyclic:bool=True,
+         pdb_redo:bool=True,
          soft_iters:int=30,
          hard_iters:int=6):
+    """120 soft iters, 32 hard iters is recommended"""
+
     outputs = afdesign.remote(pdb, target_chain, target_hotspot, target_flexible,
-                              binder_len=binder_len, is_cyclic=is_cyclic,
+                              binder_len=binder_len, binder_seq=binder_seq,
+                              make_cyclic=make_cyclic, pdb_redo=pdb_redo,
                               soft_iters=soft_iters, hard_iters=hard_iters)
 
     for (out_file, out_content) in outputs:
