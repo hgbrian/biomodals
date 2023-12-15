@@ -32,7 +32,7 @@ image = (Image
          #.from_registry("nvidia/cuda:12.3.1-runtime-ubuntu22.04", add_python="3.10")
          .apt_install("git", "wget", "aria2", "ffmpeg")
          .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
-         .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==v0.2.1")
+         .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
          .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
          .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
                        "mkdir /params")
@@ -440,21 +440,28 @@ def main(pdb:str, target_chain:str,
          target_flexible:bool=True,
          binder_len=12,
          binder_seq=None,
+         binder_chain=None,
          make_cyclic:bool=True,
+         use_multimer:bool=False,
+         num_recycles:int=3,
+         num_models:int=2,
          pdb_redo:bool=True,
          soft_iters:int=30,
-         hard_iters:int=6):
+         hard_iters:int=6,
+         num_parallel:int=1):
     """120 soft iters, 32 hard iters is recommended"""
 
-    outputs = afdesign.remote(pdb, target_chain, target_hotspot, target_flexible,
-                              binder_len=binder_len, binder_seq=binder_seq,
-                              make_cyclic=make_cyclic, pdb_redo=pdb_redo,
-                              soft_iters=soft_iters, hard_iters=hard_iters)
+    # I can't figure out how to use kwargs with map so order is important
+    args = tuple((pdb, target_chain, target_hotspot, target_flexible,
+                  binder_len, binder_seq, binder_chain,
+                  make_cyclic, use_multimer, num_recycles, num_models, pdb_redo,
+                  soft_iters, hard_iters))
 
-    for (out_file, out_content) in outputs:
-        out_path = Path(MODAL_OUT) / out_file
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_content:
-            with open(out_path, 'wb') as out:
-                out.write(out_content)
+    for outputs in afdesign.starmap([args for _ in range(num_parallel)]):
+        for (out_file, out_content) in outputs:
+            out_path = Path(MODAL_OUT) / out_file
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_content:
+                with open(out_path, 'wb') as out:
+                    out.write(out_content)
 
