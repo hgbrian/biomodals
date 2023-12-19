@@ -58,6 +58,11 @@ else:
                 return func
             return decorator
     stub = Stub()
+
+    class Mount:
+        @staticmethod
+        def from_local_dir(*args, **kwargs):
+            return args
     image = None
 
 
