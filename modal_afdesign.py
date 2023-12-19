@@ -20,15 +20,13 @@ import sys
 from pathlib import Path
 is_modal = (Path(sys.argv[0]).name == "modal")
 
-from modal import Image, Mount, Stub
-from pathlib import Path
-
 FORCE_BUILD = False
 MODAL_IN = "modal_in/afdesign"
 MODAL_OUT = "modal_out/afdesign"
 OUTPUT_ROOT = "afdesign"
 
 if is_modal:
+    from modal import Image, Mount, Stub
     data_dir = "/"
     stub = Stub()
 
