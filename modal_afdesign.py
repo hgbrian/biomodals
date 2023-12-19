@@ -16,6 +16,9 @@ To do this, we maximize number of contacts at the interface and maximize pLDDT o
 2.   Using AfDesign as the only "loss" function for design might be a bad idea, you may find 
      adversarial sequences (aka. sequences that trick AlphaFold).
 """
+import sys
+from pathlib import Path
+is_modal = (Path(sys.argv[0]).name == "modal")
 
 from modal import Image, Mount, Stub
 from pathlib import Path
@@ -25,20 +28,40 @@ MODAL_IN = "modal_in/afdesign"
 MODAL_OUT = "modal_out/afdesign"
 OUTPUT_ROOT = "afdesign"
 
-stub = Stub()
+if is_modal:
+    data_dir = "/"
+    stub = Stub()
 
-image = (Image
-         .debian_slim()
-         #.from_registry("nvidia/cuda:12.3.1-runtime-ubuntu22.04", add_python="3.10")
-         .apt_install("git", "wget", "aria2", "ffmpeg")
-         .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
-         .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
-         .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
-         .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
-                       "mkdir /params")
-         .run_commands("aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
-                       "tar -xf alphafold_params_2022-12-06.tar -C /params")
-)
+    image = (Image
+            .debian_slim()
+            #.from_registry("nvidia/cuda:12.3.1-runtime-ubuntu22.04", add_python="3.10")
+            .apt_install("git", "wget", "aria2", "ffmpeg")
+            .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
+            .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
+            .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
+            .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
+                          "mkdir /params")
+            .run_commands("aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
+                          "tar -xf alphafold_params_2022-12-06.tar -C /params")
+    )
+else:
+    # download via aria2c -> ./afdesign_params
+    data_dir = "./afdesign_params"
+
+    class Stub:
+        @staticmethod
+        def function(*args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+        @staticmethod
+        def local_entrypoint(*args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    stub = Stub()
+    image = None
+
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -65,7 +88,10 @@ from scipy.special import softmax
 # ------------------------------------------------------------------------------
 #
 def get_pdb(pdb_code, biological_assembly=False, pdb_redo=False):
-    if (Path("/in") / Path(pdb_code).name).is_file():
+    """TODO Mapping from modal_in to /in is a mess here."""
+    if Path(pdb_code).is_file():
+        return str(Path(pdb_code).resolve())
+    elif (Path("/in") / Path(pdb_code).name).is_file():
         return str(Path("/in") / Path(pdb_code).name)
     elif len(pdb_code) == 4:
         if pdb_redo:
@@ -83,7 +109,7 @@ def get_pdb(pdb_code, biological_assembly=False, pdb_redo=False):
 # BN added this cell
 #
 def add_cyclic_offset(self):
-    """add cyclic offset to connect N and C term"""
+    """add cyclic offset to connect N and C term head to tail"""
     def _cyclic_offset(L):
         i = np.arange(L)
         ij = np.stack([i,i+L],-1)
@@ -146,7 +172,8 @@ def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
 # BN added this merging tool
 #
 def join_chains(pdb_file, target_chain, merge_chains):
-    """use pdb-tools to combine the pdb file into one chain"""
+    """Use pdb-tools to combine the pdb file into one chain.
+    Probably unnecessary!"""
     with NamedTemporaryFile(suffix=".pdb", delete=False) as tf:
         subprocess.run(f"pdb_selchain -{','.join(merge_chains)} {pdb_file} | "
                        f"pdb_chain -{target_chain} | pdb_reres -1 > {tf.name}", shell=True, check=True)
@@ -155,7 +182,8 @@ def join_chains(pdb_file, target_chain, merge_chains):
 # ------------------------------------------------------------------------------
 # BN added this cell
 #
-def MAYBE_get_nearby_residues(pdb_file, ligand_id, distance=8.0):
+def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
+    """Report the residues within `distance` of the ligand as a dict."""
     parser = PDBParser()
     structure = parser.get_structure('protein', pdb_file)
 
@@ -197,7 +225,8 @@ def MAYBE_get_nearby_residues(pdb_file, ligand_id, distance=8.0):
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
 def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:bool=True,
              binder_len:int=30, binder_seq=None, binder_chain=None,
-             make_cyclic:bool=False,
+             set_fixed_aas = None,
+             make_cyclic:bool=True,
              use_multimer:bool = False,
              num_recycles:int = 3,
              num_models = 2,
@@ -235,15 +264,10 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     if binder_seq is not None:
         binder_seq = re.sub("[^A-Z]", "", binder_seq.upper())
         binder_len = len(binder_seq)
-    print("binder_seq:", binder_seq, "bind_len:", binder_len)
+    print("binder_seq:", binder_seq, "binder_len:", binder_len)
     assert binder_len > 0, "binder_len must be > 0"
 
     num_models = 5 if num_models == "all" else int(num_models)
-
-    # BN params
-    ADD_CYSTEINES:bool = False
-    ADD_FOLLISTATIN_MOTIF:bool = False
-    ADD_P:bool = False
 
     x = {"pdb_filename":pdb,
          "chain":target_chain,
@@ -264,29 +288,15 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     # ------------------------------------------------------------------------------
     # BN add bias for Cysteine cyclic peptide
     #
-
-    if ADD_CYSTEINES:
-        # ensure that the first and last aas are cysteines
+    _bias = None
+    if set_fixed_aas is not None:
         aa_order = residue_constants.restype_order
-        _bias = np.zeros((binder_len, 20))
-        _bias[0, aa_order["C"]] = 1e16
-        _bias[-1, aa_order["C"]] = 1e16
-    if ADD_FOLLISTATIN_MOTIF:
-        # add specific amino acids at specific positions
-        aa_order = residue_constants.restype_order
-        _bias = np.zeros((binder_len, 20))
-        #_bias[0, aa_order["K"]] = 1e4
-        #_bias[1, aa_order["W"]] = 1e4
-        _bias[2, aa_order["M"]] = 1e4
-        _bias[3, aa_order["I"]] = 1e4
-        _bias[4, aa_order["F"]] = 1e4
-        #_bias[5, aa_order["N"]] = 1e4
-        #_bias[6, aa_order["G"]] = 1e4
-    if ADD_P:
-        # add a P at position 4 because it worked
-        aa_order = residue_constants.restype_order
-        _bias = np.zeros((binder_len, 20))
-        _bias[4, aa_order["P"]] = 1e5
+        assert len(set_fixed_aas) == binder_len, "add_fixed_aas must be same length as binder_len"
+        assert len(aa_order.keys()) == 20, "restype_order has changed"
+        _bias = np.zeros((binder_len, len(residue_constants.restype_order)))
+        for n, aa in enumerate(set_fixed_aas):
+            if aa in aa_order:
+                _bias[n, aa_order[aa]] = 1e16
 
     # TODO check this -- something to do with redos???????????
     if "x_prev" not in dir() or x != x_prev:
@@ -295,7 +305,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
                                   use_multimer=x["use_multimer"],
                                   num_recycles=num_recycles,
                                   recycle_mode="sample",
-                                  data_dir="/"
+                                  data_dir=data_dir
                                   )
         model.prep_inputs(**x, ignore_missing=False)
         # BN make cyclic peptide
@@ -335,7 +345,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     # ------------------------------------------------------------------------------
     # BN added Cysteine cyclic peptide bias here
     #
-    if ADD_CYSTEINES or ADD_FOLLISTATIN_MOTIF or ADD_P:
+    if _bias is not None:
         model.restart(seq=binder_seq, bias=_bias)
     else:
         model.restart(seq=binder_seq)
@@ -386,9 +396,10 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     show_mainchains:bool = True #@param {type:"boolean"}
     color_HP:bool = False #@param {type:"boolean"}
     animate:bool = True #@param {type:"boolean"}
-    model.plot_pdb(show_sidechains=show_sidechains,
-                   show_mainchains=show_mainchains,
-                   color=color, color_HP=color_HP, animate=animate)
+    if is_modal:
+        model.plot_pdb(show_sidechains=show_sidechains,
+                       show_mainchains=show_mainchains,
+                       color=color, color_HP=color_HP, animate=animate)
 
     # takes 30s+
     html_content = model.animate(dpi=100)
@@ -441,6 +452,7 @@ def main(pdb:str, target_chain:str,
          binder_len=12,
          binder_seq=None,
          binder_chain=None,
+         set_fixed_aas=None,
          make_cyclic:bool=True,
          use_multimer:bool=False,
          num_recycles:int=3,
@@ -453,11 +465,12 @@ def main(pdb:str, target_chain:str,
 
     # I can't figure out how to use kwargs with map so order is important
     args = tuple((pdb, target_chain, target_hotspot, target_flexible,
-                  binder_len, binder_seq, binder_chain,
+                  binder_len, binder_seq, binder_chain, set_fixed_aas,
                   make_cyclic, use_multimer, num_recycles, num_models, pdb_redo,
                   soft_iters, hard_iters))
 
-    for outputs in afdesign.starmap([args for _ in range(num_parallel)]):
+    for outputs in (afdesign(*args) for _ in range(num_parallel)):
+    #for outputs in afdesign.starmap([args for _ in range(num_parallel)]):
         for (out_file, out_content) in outputs:
             out_path = Path(MODAL_OUT) / out_file
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -465,3 +478,33 @@ def main(pdb:str, target_chain:str,
                 with open(out_path, 'wb') as out:
                     out.write(out_content)
 
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='Protein design using AlphaFold.')
+
+    parser.add_argument('--pdb', type=str, help='PDB code or filename')
+    parser.add_argument('--target-chain', type=str, help='Target chain, comma-delimited if more than one')
+    parser.add_argument('--target-hotspot', type=str, default=None, help='Target hotspot')
+    parser.add_argument('--target-flexible', type=bool, default=True, help='Target flexibility')
+    parser.add_argument('--binder-len', type=int, default=12, help='Length of the binder')
+    parser.add_argument('--binder-seq', type=str, default=None, help='Sequence of the binder')
+    parser.add_argument('--binder-chain', type=str, default=None, help='Binder chain')
+    parser.add_argument('--set-fixed-aas', type=str, default=None, help='Input like C.....C for Cysteine cyclic peptide')
+    parser.add_argument('--make-cyclic', type=bool, default=True, help='Make cyclic binder')
+    parser.add_argument('--use-multimer', type=bool, default=False, help='Use multimer')
+    parser.add_argument('--num-recycles', type=int, default=3, help='Number of recycles')
+    parser.add_argument('--num_models', type=int, default=2, help='Number of models')
+    parser.add_argument('--pdb-redo', type=bool, default=True, help='PDB redo option')
+    parser.add_argument('--soft-iters', type=int, default=30, help='Number of soft iterations')
+    parser.add_argument('--hard-iters', type=int, default=6, help='Number of hard iterations')
+    #parser.add_argument('--num-parallel', type=int, default=None, help='Number of parallel jobs')
+
+    args = parser.parse_args()
+    if args.pdb and args.target_chain:
+        main(args.pdb, args.target_chain, args.target_hotspot, args.target_flexible,
+             args.binder_len, args.binder_seq, args.binder_chain, args.set_fixed_aas,
+             args.make_cyclic, args.use_multimer, args.num_recycles, args.num_models, 
+             args.pdb_redo, args.soft_iters, args.hard_iters)
+    else:
+        print(parser.print_help())
