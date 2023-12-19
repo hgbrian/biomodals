@@ -294,7 +294,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     _bias = None
     if set_fixed_aas is not None:
         aa_order = residue_constants.restype_order
-        assert len(set_fixed_aas) == binder_len, "add_fixed_aas must be same length as binder_len"
+        assert len(set_fixed_aas) == binder_len, f"add_fixed_aas: {len(set_fixed_aas)} must be same length as binder_len: {binder_len}"
         assert len(aa_order.keys()) == 20, "restype_order has changed"
         _bias = np.zeros((binder_len, len(residue_constants.restype_order)))
         for n, aa in enumerate(set_fixed_aas):
