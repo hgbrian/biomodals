@@ -48,15 +48,18 @@ def run_hacnet(pdbs_ligands:list, verbose=False) -> dict:
     return pkds
 
 @stub.local_entrypoint()
-def main(pdb:str, mol2:str):
-    # Do all by all, allow comma separated lists
-    pdbs_ligands = [(_pdb.strip(), _mol2.strip()) for _pdb in pdb.split(",") for _mol2 in mol2.split(",") ]
+def main(pdb:str, mol2:str, all_by_all:bool=False):
+    if all_by_all:
+        pdbs_ligands = [(_pdb.strip(), _mol2.strip()) for _pdb in pdb.split(",") for _mol2 in mol2.split(",") ]
+    else:
+        pdbs_ligands = [(_pdb.strip(), _mol2.strip()) for _pdb, _mol2 in zip(pdb.split(","), mol2.split(",")) ]
+
 
     pkds = run_hacnet.remote(pdbs_ligands)
 
     today = datetime.today().strftime("%Y%m%d")
-    outfile = (Path(MODAL_OUT) / f"{today}_{'-'.join(Path(_pdb).name for _pdb in pdb.split(','))}"
-               f"_{'-'.join(Path(_mol2).name for _mol2 in mol2.split(','))}_pkds.tsv")
+    outfile = (Path(MODAL_OUT) / f"{today}_{'-'.join(Path(_pdb).name for _pdb in pdb.split(',')[0:1])}"
+               f"_{'-'.join(Path(_mol2).name for _mol2 in mol2.split(',')[0:1])}_pkds.tsv")
 
     Path(outfile).parent.mkdir(parents=True, exist_ok=True)
     with open(outfile, 'w') as out:
