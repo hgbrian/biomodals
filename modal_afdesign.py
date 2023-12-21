@@ -18,21 +18,20 @@ To do this, we maximize number of contacts at the interface and maximize pLDDT o
 """
 import sys
 from pathlib import Path
-is_modal = (Path(sys.argv[0]).name == "modal")
+is_local = "--local" in sys.argv
 
 FORCE_BUILD = False
 MODAL_IN = "modal_in/afdesign"
 MODAL_OUT = "modal_out/afdesign"
 OUTPUT_ROOT = "afdesign"
 
-if is_modal:
+if not is_local:
     from modal import Image, Mount, Stub
     data_dir = "/"
     stub = Stub()
 
     image = (Image
             .debian_slim()
-            #.from_registry("nvidia/cuda:12.3.1-runtime-ubuntu22.04", add_python="3.10")
             .apt_install("git", "wget", "aria2", "ffmpeg")
             .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
             .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
@@ -399,7 +398,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     show_mainchains:bool = True #@param {type:"boolean"}
     color_HP:bool = False #@param {type:"boolean"}
     animate:bool = True #@param {type:"boolean"}
-    if is_modal:
+    if not is_local:
         model.plot_pdb(show_sidechains=show_sidechains,
                        show_mainchains=show_mainchains,
                        color=color, color_HP=color_HP, animate=animate)
@@ -501,6 +500,7 @@ if __name__ == "__main__":
     parser.add_argument('--pdb-redo', type=bool, default=True, help='PDB redo option')
     parser.add_argument('--soft-iters', type=int, default=30, help='Number of soft iterations')
     parser.add_argument('--hard-iters', type=int, default=6, help='Number of hard iterations')
+    parser.add_argument('--local', default=False, action="store_true", help='Run locally')
     #parser.add_argument('--num-parallel', type=int, default=None, help='Number of parallel jobs')
 
     args = parser.parse_args()
