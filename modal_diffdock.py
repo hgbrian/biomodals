@@ -1,5 +1,5 @@
 """
-DiffDock 
+# DiffDock 
 
 There are lots of file dependencies that get downloaded.
 Here is the output from running `python -m inference` the first time:
@@ -17,7 +17,6 @@ Downloading: "https://dl.fbaipublicfiles.com/fair-esm/regression/esm2_t33_650M_U
 
 
 from pathlib import Path
-from datetime import datetime
 from pathlib import Path
 
 import modal

@@ -27,3 +27,10 @@ modal run modal_minimap2.py --input-fasta modal_in/minimap2/mito.fasta --input-r
 ```
 modal run modal_afdesign.py --pdb 4MZK --target-chain A
 ```
+
+## DiffDock
+
+```
+modal run modal_diffdock.py --pdb in/diffdock/1igy.pdb --mol2 in/diffdock/1igy.mol2
+```
+
