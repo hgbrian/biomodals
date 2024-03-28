@@ -1,6 +1,10 @@
 """
 # DiffDock 
 
+- seems to require 80GB A100 to run for any reasonable sized protein
+- if it fails, it may be related to batch_size, but reducing batch_size causes other issues
+
+## Dependencies
 There are lots of file dependencies that get downloaded.
 Here is the output from running `python -m inference` the first time:
 
