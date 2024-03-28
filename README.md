@@ -7,6 +7,7 @@ pip install modal
 python3 -m modal setup
 ```
 
+
 ## OmegaFold
 
 Runs `omegafold --model 2 <fasta>`
@@ -34,3 +35,6 @@ modal run modal_afdesign.py --pdb 4MZK --target-chain A
 modal run modal_diffdock.py --pdb in/diffdock/1igy.pdb --mol2 in/diffdock/1igy.mol2
 ```
 
+## TODO
+- unify file input / output in some sensible way
+- replace modal_in directory to in for all examples
