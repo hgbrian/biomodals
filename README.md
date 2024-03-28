@@ -31,6 +31,8 @@ modal run modal_afdesign.py --pdb 4MZK --target-chain A
 
 ## DiffDock
 
+DiffDock seems to require an 80GB A100 to run without running out of memory.
+
 ```
 modal run modal_diffdock.py --pdb in/diffdock/1igy.pdb --mol2 in/diffdock/1igy.mol2
 ```
