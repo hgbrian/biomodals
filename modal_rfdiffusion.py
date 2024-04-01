@@ -25,6 +25,9 @@ contigs='A' pdb='1SSC' - fix chain A, noise the rest
 ## hints and tips
 pdb='' leave blank to get an upload prompt
 contigs='50-100' use dash to specify a range of lengths to sample from
+
+e.g., to make a binder for 1A00
+modal run modal_rfdiffusion.py --pdb 1A00 --contigs "A,B:20"
 """
 
 import glob
@@ -81,8 +84,8 @@ import matplotlib.pyplot as plt
 
 
 def get_pdb(pdb_code):
-  if os.path.isfile(pdb_code):
-    return pdb_code
+  if os.path.isfile(f"/in/{Path(pdb_code).name}"):
+    return f"/in/{Path(pdb_code).name}"
   elif len(pdb_code) == 4:
     if not os.path.isfile(f"{pdb_code}.pdb1"):
       os.system(f"wget -qnc https://files.rcsb.org/download/{pdb_code}.pdb1.gz")
@@ -456,12 +459,15 @@ def rfdiffusion(contigs:str, pdb:str,
     # designability test here
 
     return [(outfile, open(outfile, "rb").read())
-            for outfile in glob.glob(f"{OUTPUT_ROOT}/**/*.*", recursive=True)]
+            for outfile in glob.glob(f"{OUTPUT_ROOT}/**/*.*", recursive=True)
+            if os.path.isfile(outfile)]
 
 
 @stub.local_entrypoint()
 def main(pdb:str, contigs:str,
-         name:str='', iterations:int=25):
+         name:str='',
+         iterations:int=25):
+
     outputs = rfdiffusion.remote(contigs, pdb, iterations=iterations, name=name)
 
     for (out_file, out_content) in outputs:
