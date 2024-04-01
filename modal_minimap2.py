@@ -1,11 +1,18 @@
+"""Run minimap2 on short reads. Mostly just a demo.
+
+Runs minimap2 on short reads.
+It takes as input a fasta file and a fastq file, and returns the alignment in PAF format.
+"""
+
 from subprocess import run
 from pathlib import Path
 
 from modal import Image, Mount, Stub
 
 FORCE_BUILD = False
-MODAL_IN = "./modal_in/minimap2"
-MODAL_OUT = "./modal_out/minimap2"
+LOCAL_IN = "./in/minimap2"
+LOCAL_OUT = "./out/minimap2"
+REMOTE_IN = "/in"
 
 stub = Stub()
 
@@ -16,22 +23,23 @@ image = (Image
         )
 
 @stub.function(image=image, gpu=None, timeout=60*15,
-               mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def minimap2_short_reads(input_fasta:str, input_reads:str) -> list[str, str]:
-    input_fasta = Path(input_fasta)
-    input_reads = Path(input_reads)
-    assert input_fasta.parent.resolve() == Path(MODAL_IN).resolve(), f"wrong input_fasta dir {input_fasta.parent}"
-    assert input_reads.parent.resolve() == Path(MODAL_IN).resolve(), f"wrong input_reads dir {input_reads.parent}"
-    out_name = f"{MODAL_OUT}/{input_fasta.stem}_{input_reads.stem}.aln"
+               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
+def minimap2_short_reads(input_fasta:str, input_reads:str, params:tuple) -> list[str, str]:
+    input_fasta = Path(input_fasta).relative_to(LOCAL_IN)
+    input_reads = Path(input_reads).relative_to(LOCAL_IN)
 
-    run(["mkdir", "-p", MODAL_OUT], check=True)
-    run(["/minimap2/minimap2", "-ax", "sr", f"/in/{input_fasta.name}", f"/in/{input_reads.name}", "-o", out_name], check=True)
+    Path(LOCAL_OUT).mkdir(parents=True, exist_ok=True)
+    out_path = Path(LOCAL_OUT) / f"{input_fasta.stem}_{input_reads.stem}.paf"
 
-    return [(out_name, open(out_name, "rb").read())]
+    run(["/minimap2/minimap2", *params.split(),
+         Path(REMOTE_IN) / input_fasta, Path(REMOTE_IN) / input_reads,
+         "-o", out_path], check=True)
+
+    return [(out_path, open(out_path, "rb").read())]
 
 @stub.local_entrypoint()
-def main(input_fasta, input_reads):
-    outputs = minimap2_short_reads.remote(input_fasta, input_reads)
+def main(input_fasta:str, input_reads:str, params:str="-ax sr"):
+    outputs = minimap2_short_reads.remote(input_fasta, input_reads, params)
 
     for (out_file, out_content) in outputs:
         Path(out_file).parent.mkdir(parents=True, exist_ok=True)
