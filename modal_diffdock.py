@@ -1,10 +1,11 @@
 """
 # DiffDock 
 
-- seems to require 80GB A100 to run for any reasonable sized protein
-- if it fails, it may be related to batch_size, but reducing batch_size causes other issues
+- by default uses a 40GB A100 but may require 80GB A100 for larger proteins
+- setting batch_size=1 may also help
 
 ## Dependencies
+
 There are lots of file dependencies that get downloaded.
 Here is the output from running `python -m inference` the first time:
 
@@ -20,6 +21,7 @@ Downloading: "https://dl.fbaipublicfiles.com/fair-esm/regression/esm2_t33_650M_U
 """
 
 from pathlib import Path
+from warnings import warn
 
 import modal
 from modal import Image, Mount, Stub
@@ -59,12 +61,15 @@ image = (Image
          .run_commands("cd DiffDock && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && python -m inference || true")
         )
 
-@stub.function(image=image, gpu=modal.gpu.A100(size="80GB"), timeout=60*15,
+@stub.function(image=image, gpu=modal.gpu.A100(size="40GB"), timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def run_diffdock(pdbs_ligands:list) -> dict:
+def run_diffdock(pdbs_ligands:list, batch_size:int=5) -> dict:
     from subprocess import run
     import os
     os.chdir("/DiffDock")
+
+    if batch_size not in (1, 5, 10):
+        warn(f"batch_size only tested with 1, 5, or 10. This may not work.")
 
     outputs = []
     for pdb, ligand in pdbs_ligands:
@@ -75,10 +80,11 @@ def run_diffdock(pdbs_ligands:list) -> dict:
         run("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && "
             f"python -m inference"
             f" --protein_path {remote_pdb}"
+            f" --batch_size {batch_size}"
             f" --ligand {remote_ligand}"
             f" --out_dir {out_dir}",
             shell=True)
-    
+
         outputs.extend([(_pdb, _ligand, out_file.name, open(out_file, "rb").read())
                         for out_file in Path(out_dir).glob("**/*.*")
                         if os.path.isfile(out_file)])
@@ -86,10 +92,10 @@ def run_diffdock(pdbs_ligands:list) -> dict:
     return outputs
 
 @stub.local_entrypoint()
-def main(pdb:str, mol2:str):
-    pdbs_ligands = [(_pdb.strip(), _mol2.strip()) for _pdb, _mol2 in zip(pdb.split(","), mol2.split(",")) ]
+def main(pdb:str, mol2:str, batch_size:int=5):
+    pdbs_ligands = [(_pdb.strip(), _mol2.strip()) for _pdb, _mol2 in zip(pdb.split(","), mol2.split(","))]
 
-    outputs = run_diffdock.remote(pdbs_ligands)
+    outputs = run_diffdock.remote(pdbs_ligands, batch_size)
 
     for (pdb, ligand, out_file, out_content) in outputs:
         out_path = Path(MODAL_OUT) / Path(f"{pdb}_{ligand}") / Path(out_file)
