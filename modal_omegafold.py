@@ -6,8 +6,9 @@ from pathlib import Path
 from modal import Image, Mount, Stub
 
 FORCE_BUILD = False
-MODAL_IN = "./modal_in/omegafold"
-MODAL_OUT = "./modal_out/omegafold"
+LOCAL_IN = "./in/omegafold"
+LOCAL_OUT = "./out/omegafold"
+REMOTE_IN = "/in"
 
 stub = Stub()
 
@@ -18,22 +19,22 @@ image = (Image
         )
 
 @stub.function(image=image, gpu="a100", timeout=60*15,
-               mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
-def omegafold(input_fasta:str) -> list[str, str]:
-    input_fasta = Path(input_fasta)
-    assert input_fasta.parent.resolve() == Path(MODAL_IN).resolve(), f"wrong input_fasta dir {input_fasta.parent}"
-    assert input_fasta.suffix in (".faa", ".fasta"), f"not fasta file {input_fasta}"
+               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
+def omegafold(input_fasta:str, subbatch_size:int) -> list[str, str]:
+    input_fasta = Path(input_fasta).relative_to(LOCAL_IN)
+    assert input_fasta.suffix in (".faa", ".fasta"), f"not a fasta file: {input_fasta}"
 
-    run(["mkdir", "-p", MODAL_OUT], check=True)
-    run(["omegafold", "--model", "2", "--subbatch_size", "224",
-         f"/in/{input_fasta.name}", MODAL_OUT], check=True)
+    Path(LOCAL_OUT).mkdir(parents=True, exist_ok=True)
+
+    run(["omegafold", "--model", "2", "--subbatch_size", str(subbatch_size),
+         Path(REMOTE_IN) / input_fasta.name, LOCAL_OUT], check=True)
 
     return [(pdb_file, open(pdb_file, "rb").read())
-            for pdb_file in glob.glob(f"{MODAL_OUT}/**/*.pdb", recursive=True)]
+            for pdb_file in glob.glob(f"{LOCAL_OUT}/**/*.pdb", recursive=True)]
 
 @stub.local_entrypoint()
-def main(input_fasta):
-    outputs = omegafold.remote(input_fasta)
+def main(input_fasta, subbatch_size:int=224):
+    outputs = omegafold.remote(input_fasta, subbatch_size)
 
     for (out_file, out_content) in outputs:
         Path(out_file).parent.mkdir(parents=True, exist_ok=True)
