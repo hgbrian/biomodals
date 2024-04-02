@@ -49,10 +49,17 @@ modal run modal_afdesign.py --pdb in/afdesign/1igy_cropped.fixed.pdb --target-ch
 
 ## DiffDock
 
-DiffDock seems to require an 80GB A100 to run without running out of memory.
+DiffDock may require an 80GB A100 to run for larger proteins.
 
 ```
 modal run modal_diffdock.py --pdb in/diffdock/1igy.pdb --mol2 in/diffdock/1igy.mol2
+```
+
+## pdb2png
+
+A simple pymol-based script to convert PDBs to PNGs for easy output viewing.
+```
+modal run modal_pdb2png.py --input-pdb in/pdb2png/1igy.pdb --protein-zoom 0.8 --protein-color 240,200,190
 ```
 
 ## TODO
