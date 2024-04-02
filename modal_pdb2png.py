@@ -213,9 +213,12 @@ def main(input_pdb,
          width=1600,
          height=1600) -> list:
 
-    protein_rotate = tuple(map(float, protein_color.split(",")))
-    if "," in protein_color: protein_color = tuple(map(float, protein_color.split(",")))
-    if "," in ligand_color: ligand_color = tuple(map(float, ligand_color.split(",")))
+    if isinstance(protein_rotate, str):
+        protein_rotate = tuple(map(float, protein_color.split(",")))
+    if isinstance(protein_color, str) and "," in protein_color:
+        protein_color = tuple(map(float, protein_color.split(",")))
+    if isinstance(ligand_color, str) and "," in ligand_color:
+        ligand_color = tuple(map(float, ligand_color.split(",")))
 
     outputs = pdb2png.remote(input_pdb, protein_rotate, protein_color, protein_zoom,
                              hetatm_color, ligand_id, ligand_chain, ligand_zoom, ligand_color,
