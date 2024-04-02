@@ -5,7 +5,6 @@
 - setting batch_size=1 may also help
 
 ## Dependencies
-
 There are lots of file dependencies that get downloaded.
 Here is the output from running `python -m inference` the first time:
 
@@ -26,8 +25,9 @@ from warnings import warn
 import modal
 from modal import Image, Mount, Stub
 
-MODAL_IN = "./in/diffdock"
-MODAL_OUT = "./out/diffdock"
+LOCAL_IN = "./in/diffdock"
+LOCAL_OUT = "./out/diffdock"
+REMOTE_IN = "/in"
 
 stub = Stub()
 
@@ -62,19 +62,19 @@ image = (Image
         )
 
 @stub.function(image=image, gpu=modal.gpu.A100(size="40GB"), timeout=60*15,
-               mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
+               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
 def run_diffdock(pdbs_ligands:list, batch_size:int=5) -> dict:
     from subprocess import run
     import os
     os.chdir("/DiffDock")
 
     if batch_size not in (1, 5, 10):
-        warn(f"batch_size only tested with 1, 5, or 10. This may not work.")
+        warn("batch_size only tested with 1, 5, or 10. This may not work.")
 
     outputs = []
     for pdb, ligand in pdbs_ligands:
-        _pdb, _ligand = Path(pdb).relative_to(MODAL_IN), Path(ligand).relative_to(MODAL_IN)
-        remote_pdb, remote_ligand = Path("/in") / _pdb, Path("/in") / _ligand
+        _pdb, _ligand = Path(pdb).relative_to(LOCAL_IN), Path(ligand).relative_to(LOCAL_IN)
+        remote_pdb, remote_ligand = Path(REMOTE_IN) / _pdb, Path(REMOTE_IN) / _ligand
         out_dir = f"./out_{_pdb.stem}_{_ligand.stem}"
 
         run("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && "
@@ -98,7 +98,7 @@ def main(pdb:str, mol2:str, batch_size:int=5):
     outputs = run_diffdock.remote(pdbs_ligands, batch_size)
 
     for (pdb, ligand, out_file, out_content) in outputs:
-        out_path = Path(MODAL_OUT) / Path(f"{pdb}_{ligand}") / Path(out_file)
+        out_path = Path(LOCAL_OUT) / Path(f"{pdb}_{ligand}") / Path(out_file)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         if out_content:
             with open(out_path, 'wb') as out:
