@@ -18,103 +18,54 @@ To do this, we maximize number of contacts at the interface and maximize pLDDT o
      adversarial sequences (aka. sequences that trick AlphaFold).
 """
 
-import sys
-from pathlib import Path
-is_local = "--local" in sys.argv
-
-FORCE_BUILD = False
-MODAL_IN = "in/afdesign"
-MODAL_OUT = "out/afdesign"
-
-if not is_local:
-    from modal import Image, Mount, Stub
-    data_dir = "/"
-    stub = Stub()
-
-    image = (Image
-            .debian_slim()
-            .apt_install("git", "wget", "aria2", "ffmpeg")
-            .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
-            .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
-            .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
-            .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
-                          "mkdir /params")
-            .run_commands("aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
-                          "tar -xf alphafold_params_2022-12-06.tar -C /params")
-    )
-else:
-    # download via aria2c -> ./afdesign_params
-    data_dir = "./afdesign_params"
-
-    class Stub:
-        @staticmethod
-        def function(*args, **kwargs):
-            def decorator(func):
-                return func
-            return decorator
-        @staticmethod
-        def local_entrypoint(*args, **kwargs):
-            def decorator(func):
-                return func
-            return decorator
-    stub = Stub()
-    class Mount:
-        @staticmethod
-        def from_local_dir(*args, **kwargs):
-            return args
-    image = None
-
-
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-
 import re
+import subprocess
+import tempfile
+import warnings
+
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+import numpy as np
+
+from utils.pdb_utils import get_pdb
+
+from Bio.PDB import PDBParser, PDBIO, Select
+from Bio.PDB.Polypeptide import is_aa
+from Bio.PDB.NeighborSearch import NeighborSearch
+from scipy.special import softmax
 
 from colabdesign import mk_afdesign_model, clear_mem
 from colabdesign.shared.utils import copy_dict
 from colabdesign.af.alphafold.common import residue_constants
 import plotly.express as px
 
-import numpy as np
+from modal import Image, Mount, Stub
 
-import subprocess
-import tempfile
-from tempfile import NamedTemporaryFile
-from Bio.PDB import PDBParser, PDBIO, Select
-from Bio.PDB.Polypeptide import is_aa
-from Bio.PDB.NeighborSearch import NeighborSearch
-from scipy.special import softmax
+LOCAL_IN = "in/afdesign"
+LOCAL_OUT = "out/afdesign"
+REMOTE_IN = "/in"
+GPU = "a100"
+DATA_DIR = "/"
 
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
-# ------------------------------------------------------------------------------
-#
-def get_pdb(pdb_code, biological_assembly=False, pdb_redo=False):
-    """TODO Mapping from modal_in to /in is a mess here."""
-    if Path(pdb_code).is_file():
-        outfile = str(Path(pdb_code).resolve())
-    elif (Path("/in") / Path(pdb_code).name).is_file():
-        outfile = str(Path("/in") / Path(pdb_code).name)
-    elif len(pdb_code) == 4:
-        if pdb_redo:
-            outfile = f"{pdb_code}_final.pdb"
-            subprocess.run(f"wget -qnc https://pdb-redo.eu/db/{pdb_code}/{outfile}", shell=True, check=True)
-        else:
-            outfile = f"{pdb_code}.pdb{'1' if biological_assembly else ''}"
-            subprocess.run(f"wget -qnc https://files.rcsb.org/view/{outfile}", shell=True, check=True)
-    else:
-        outfile = f"AF-{pdb_code}-F1-model_v3.pdb"
-        subprocess.run(f"wget -qnc https://alphafold.ebi.ac.uk/files/{outfile}", shell=True, check=True)
+stub = Stub()
+image = (Image
+        .debian_slim()
+        .apt_install("git", "wget", "aria2", "ffmpeg")
+        .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
+        .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
+        .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
+        .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
+                        "mkdir /params")
+        .run_commands("aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
+                        "tar -xf alphafold_params_2022-12-06.tar -C /params")
+)
 
-    if not Path(outfile).is_file():
-        raise FileNotFoundError(f"PDB file {pdb_code} does not exist")
-
-    if Path(outfile).stat().st_size < 1000:
-        raise AssertionError(f"PDB file is too small, something went wrong, e.g., pdb-redo will refuse poor quality pdbs")
-
-    return outfile
 
 # ------------------------------------------------------------------------------
-# BN added this cell
+# BN added this function
 #
 def add_cyclic_offset(self):
     """add cyclic offset to connect N and C term head to tail"""
@@ -142,7 +93,7 @@ def add_cyclic_offset(self):
 
 
 # ------------------------------------------------------------------------------
-# BN added this cell
+# BN added this function
 #
 class ResidueRangeSelect(Select):
     def __init__(self, chain_ids, start, end):
@@ -188,7 +139,7 @@ def join_chains(pdb_file, target_chain, merge_chains):
         return tf.name
 
 # ------------------------------------------------------------------------------
-# BN added this cell
+# BN added this function
 #
 def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
     """Report the residues within `distance` of the ligand as a dict."""
@@ -220,8 +171,8 @@ def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
 # prep inputs
 #
 
-@stub.function(image=image, gpu="a100", timeout=60*120,
-               mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
+@stub.function(image=image, gpu=GPU, timeout=60*120,
+               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
 def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:bool=True,
              binder_len:int=30, binder_seq=None, binder_chain=None,
              set_fixed_aas = None,
@@ -268,6 +219,9 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
 
     num_models = 5 if num_models == "all" else int(num_models)
 
+    if (Path(REMOTE_IN) / Path(pdb).relative_to(LOCAL_IN)).is_file():
+        pdb = str(Path(REMOTE_IN) / Path(pdb).relative_to(LOCAL_IN))
+
     x = {"pdb_filename":pdb,
          "chain":target_chain,
          "binder_len":binder_len,
@@ -299,13 +253,14 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
                 _bias[n, aa_order[aa]] = 1e16
 
     # TODO check this -- comes from the colab; something to do with redos?
+    x_prev = None
     if "x_prev" not in dir() or x != x_prev:
         clear_mem()
         model = mk_afdesign_model(protocol="binder",
                                   use_multimer=x["use_multimer"],
                                   num_recycles=num_recycles,
                                   recycle_mode="sample",
-                                  data_dir=data_dir
+                                  data_dir=DATA_DIR
                                   )
         model.prep_inputs(**x, ignore_missing=False)
         # BN make cyclic peptide
@@ -396,10 +351,10 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     show_mainchains:bool = True #@param {type:"boolean"}
     color_HP:bool = False #@param {type:"boolean"}
     animate:bool = True #@param {type:"boolean"}
-    if not is_local:
-        model.plot_pdb(show_sidechains=show_sidechains,
-                       show_mainchains=show_mainchains,
-                       color=color, color_HP=color_HP, animate=animate)
+
+    model.plot_pdb(show_sidechains=show_sidechains,
+                    show_mainchains=show_mainchains,
+                    color=color, color_HP=color_HP, animate=animate)
 
     # takes 30s+ so may not be worth it
     html_content = model.animate(dpi=100)
@@ -463,6 +418,8 @@ def main(pdb:str, target_chain:str,
          num_parallel:int=1):
     """120 soft iters, 32 hard iters is recommended"""
 
+    assert hard_iters >= 2, "fails on hard_iters=1"
+
     # I can't figure out how to use kwargs with map so order is important
     pdb_redo = not use_rcsb_pdb
     cyclic_peptide = not linear_peptide
@@ -474,7 +431,7 @@ def main(pdb:str, target_chain:str,
     # use starmap to pass multiple args
     for outputs in afdesign.starmap([args for _ in range(num_parallel)]):
         for (out_file, out_content) in outputs:
-            out_path = Path(MODAL_OUT) / out_file
+            out_path = Path(LOCAL_OUT) / out_file
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_content:
                 with open(out_path, 'wb') as out:
