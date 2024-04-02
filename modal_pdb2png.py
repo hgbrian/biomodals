@@ -144,15 +144,18 @@ def pdb2png(pdb_file:str,
         cmd.rotate("y", protein_rotate[1])
         cmd.rotate("z", protein_rotate[2])
 
-    if protein_color is not None:
-        if isinstance(protein_color, tuple):
-            n = 0
-            for chain in cmd.get_chains():
-                cmd.set_color("protein_color", protein_color[n:n+3])
-                cmd.color("protein_color", f"chain {chain} and not hetatm")
-                n = (n + 3) % len(protein_color)
-        else:
-            cmd.color(protein_color, "not hetatm")
+    if protein_color is None:
+        protein_color = DEFAULT_PROTEIN_COLORS
+
+    if isinstance(protein_color, tuple):
+        n = 0
+        for chain in cmd.get_chains():
+            cmd.set_color("protein_color", protein_color[n:n+3])
+            cmd.color("protein_color", f"chain {chain} and not hetatm")
+            n = (n + 3) % len(protein_color)
+    else:
+        # color is a string like "red"
+        cmd.color(protein_color, "not hetatm")
 
     # Color proteins and hetatms
     for hp_id, hp_color, hp_sel in [("protein", protein_color, "not hetatm"), 
@@ -177,12 +180,14 @@ def pdb2png(pdb_file:str,
         cmd.select("ligand", f"resn {ligand_id}{and_chain}")
         cmd.zoom("ligand", ligand_zoom)
 
-        if ligand_color is not None:
-            if isinstance(ligand_color, tuple):
-                cmd.set_color("ligand_color", ligand_color)
-                cmd.color("ligand_color", "ligand")
-            else:
-                cmd.color(ligand_color, "ligand")
+    if ligand_color is None:
+        ligand_color = DEFAULT_HETATM_COLORS
+
+    if isinstance(ligand_color, tuple):
+        cmd.set_color("ligand_color", ligand_color)
+        cmd.color("ligand_color", "ligand")
+    else:
+        cmd.color(ligand_color, "ligand")
 
     if not show_water:
         cmd.select("HOH", "resn HOH")
