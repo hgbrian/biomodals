@@ -15,7 +15,7 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
     elif len(pdb_code_or_file) == 4:
         if pdb_redo:
             pdb_name = f"{pdb_code_or_file}_final.pdb"
-            out_path = Path(out_dir) / Path(pdb_file)
+            out_path = Path(out_dir) / Path(pdb_name)
             run(f"wget -qnc https://pdb-redo.eu/db/{pdb_code_or_file}/{pdb_name} -O {out_path}", shell=True, check=True)
         else:
             pdb_name = f"{pdb_code_or_file}.pdb{'1' if biological_assembly else ''}"
@@ -35,3 +35,16 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
 
     return str(out_path)
 
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description='Get a PDB file.')
+    parser.add_argument('pdb_code', type=str, help='PDB code')
+    parser.add_argument('--biological_assembly', type=str, default=False, help='get biological assembly version')
+    parser.add_argument('--pdb_redo', type=str, default=True, help='use pdb redo instead of RCSB PDB')
+    parser.add_argument('--out_dir', type=str, default='.', help='out dir')
+    args = parser.parse_args()
+    pdb_path = get_pdb(args.pdb_code,
+                       biological_assembly=args.biological_assembly,
+                       pdb_redo=args.pdb_redo,
+                       out_dir=args.out_dir)
+    print(f"Downloaded {pdb_path}")
