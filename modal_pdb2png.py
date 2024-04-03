@@ -18,7 +18,9 @@ stub = Stub()
 image = (Image
          .micromamba(python_version = "3.11")
          .micromamba_install("pymol-open-source==2.5.0", channels=["conda-forge"])
-         .run_commands("apt update && apt -yq install libgl1")
+         .apt_install("libgl1")
+         .apt_install("g++")
+         .pip_install(["ProDy==2.4.1"])
         )
 
 
@@ -88,12 +90,12 @@ DEFAULT_HETATM_COLORS = (0.15, 0.7, 0.9, 0.9, 0.75, 0.15, 0.9, 0.15, 0.75)
 
 
 def apply_render_style(render_style:str) -> None:
-    """Apply render styles from a dict. 
+    """Apply render styles from a dict.
     Everything is global, because pymol.
-    
-    I cannot just use hasattr to tell what is cmd.set vs an attribute, 
+
+    I cannot just use hasattr to tell what is cmd.set vs an attribute,
     because some attributes are both cmd attributes and cmd.set attributes
-    e.g., valence is both an attribute of cmd and can be 
+    e.g., valence is both an attribute of cmd and can be
     set with cmd.set and seems to have different meanings
     """
     from pymol import cmd
@@ -110,16 +112,46 @@ def apply_render_style(render_style:str) -> None:
             cmd.set(k, v)
 
 
+def get_orientation_for_ligand(pdb_file: str, ligand_id_or_chain: Union[str, tuple[str, str]]) -> tuple[list, float]:
+    from prody import parsePDB, calcCenter
+    import numpy as np
+
+    structure = parsePDB(pdb_file)
+    if isinstance(ligand_id_or_chain, tuple):
+        ligand_center = calcCenter(structure.select(f"resname {ligand_id_or_chain[0]} and chain {ligand_id_or_chain[1]}"))
+        nonligand_center = calcCenter(structure.select(f"not resname {ligand_id_or_chain[0]} and chain {ligand_id_or_chain[1]}"))
+    else:
+        ligand_chain = structure.select(f"chain {ligand_id_or_chain}")
+        ligand_resname = structure.select(f"resname {ligand_id_or_chain}")
+        if ligand_chain is not None:
+            ligand_center = calcCenter(structure.select(f"chain {ligand_id_or_chain}"))
+            nonligand_center = calcCenter(structure.select(f"not chain {ligand_id_or_chain}"))
+        elif ligand_resname is not None:
+            # ideally arbitrarily pick one chain if there are multiple
+            ligand_center = calcCenter(structure.select(f"resname {ligand_id_or_chain}"))
+            nonligand_center = calcCenter(structure.select(f"not resname {ligand_id_or_chain}"))
+        else:
+            raise ValueError(f"Could not find ligand with id or chain {ligand_id_or_chain}")
+
+    # calculate rotation to orient ligand forward here
+    forward_vector = ligand_center - nonligand_center
+    forward_vector = forward_vector / np.linalg.norm(forward_vector)
+    axis = np.cross(forward_vector, np.array([0, 0, 1]))
+    angle = np.arccos(np.dot(forward_vector, np.array([0, 0, 1])))
+
+    return [float(v) for v in axis], float(angle * 180/np.pi)
+
+
 @stub.function(image=image, gpu=None, timeout=60*15,
                mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
-def pdb2png(pdb_file:str, 
+def pdb2png(pdb_file:str,
             protein_rotate:Union[tuple[float, float, float], None]=None,
             protein_color:Union[tuple[float, float, float], str, None]=None,
             protein_zoom:Union[float, None]=None,
             hetatm_color:Union[tuple[float, float, float], str, None]=None,
             ligand_id:Union[str, None]=None,
             ligand_chain:Union[str, None]=None,
-            ligand_zoom:float=1.0, 
+            ligand_zoom:float=None,
             ligand_color:Union[tuple[float, float, float], str]="red",
             show_water:bool=False,
             render_style:str="default",
@@ -139,10 +171,17 @@ def pdb2png(pdb_file:str,
     cmd.load(in_pdb_file)
     cmd.orient() # maybe not needed
 
+    #
+    # Rotation
+    #
     if protein_rotate is not None:
         cmd.rotate("x", protein_rotate[0])
         cmd.rotate("y", protein_rotate[1])
         cmd.rotate("z", protein_rotate[2])
+    elif ligand_id is not None or ligand_chain is not None:
+        ligand_id_or_chain = (ligand_id, ligand_chain) if ligand_id and ligand_chain else (ligand_id or ligand_chain)
+        _axis, _angle = get_orientation_for_ligand(str(in_pdb_file), ligand_id_or_chain)
+        cmd.rotate(_axis, _angle)
 
     if protein_color is None:
         protein_color = DEFAULT_PROTEIN_COLORS
@@ -158,7 +197,7 @@ def pdb2png(pdb_file:str,
         cmd.color(protein_color, "not hetatm")
 
     # Color proteins and hetatms
-    for hp_id, hp_color, hp_sel in [("protein", protein_color, "not hetatm"), 
+    for hp_id, hp_color, hp_sel in [("protein", protein_color, "not hetatm"),
                                     ("hetatm", hetatm_color, "hetatm")]:
         if hp_color is not None:
             if isinstance(hp_color, tuple):
@@ -176,18 +215,20 @@ def pdb2png(pdb_file:str,
         cmd.zoom("all", protein_zoom)
 
     if ligand_id is not None:
-        and_chain = f" and chain {ligand_chain}" if ligand_chain else ""
-        cmd.select("ligand", f"resn {ligand_id}{and_chain}")
-        cmd.zoom("ligand", ligand_zoom)
+        and_chain = f"and chain {ligand_chain}" if ligand_chain else ""
+        cmd.select("ligand", f"resn {ligand_id} {and_chain}")
 
-    if ligand_color is None:
-        ligand_color = DEFAULT_HETATM_COLORS
+        if ligand_zoom is not None:
+            cmd.zoom("ligand", ligand_zoom)
 
-    if isinstance(ligand_color, tuple):
-        cmd.set_color("ligand_color", ligand_color)
-        cmd.color("ligand_color", "ligand")
-    else:
-        cmd.color(ligand_color, "ligand")
+        if ligand_color is None:
+            ligand_color = DEFAULT_HETATM_COLORS
+
+        if isinstance(ligand_color, tuple):
+            cmd.set_color("ligand_color", ligand_color)
+            cmd.color("ligand_color", "ligand")
+        else:
+            cmd.color(ligand_color, "ligand")
 
     if not show_water:
         cmd.select("HOH", "resn HOH")
@@ -211,7 +252,7 @@ def main(input_pdb,
          hetatm_color=None,
          ligand_id=None,
          ligand_chain=None,
-         ligand_zoom=1.0, 
+         ligand_zoom=None,
          ligand_color="red",
          show_water=False,
          render_style="default",
