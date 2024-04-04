@@ -32,7 +32,7 @@ from rdkit.Chem import rdMolTransforms, rdShapeHelpers
 
 # for convenience so I can use as a script or a module
 try:
-    from utils.extract_ligands import extract_ligand
+    from .extract_ligands import extract_ligand
 except ImportError:
     from extract_ligands import extract_ligand
 
@@ -212,9 +212,8 @@ def get_pdb_and_extract_ligand(pdb_id:str,
         subprocess.run(f"wget -O {pdb_file} https://files.rcsb.org/download/{pdb_id}.pdb",
                        check=True, shell=True, capture_output=True)
 
-    prepared_pdb_file = str(Path(out_dir) / f"{pdb_id}_fixed.pdb")
-
     # FIXFIX is it ok to prepare_protein BEFORE extracting the ligand?
+    prepared_pdb_file = str(Path(out_dir) / f"{pdb_id}_fixed.pdb")
     prepare_protein(pdb_file, prepared_pdb_file, minimize_pdb=minimize_pdb, mutation=mutation)
 
     if ligand_id is None: # then extract nothing, just prepare the protein
@@ -228,27 +227,6 @@ def get_pdb_and_extract_ligand(pdb_id:str,
 
     return {"original_pdb": pdb_file, "pdb": prepared_pdb_file,
             "sdf": out_sdf_file, "smi": out_sdf_smiles}
-
-
-def _transform_conformer_to_match_reference(ref_rmol, alt_rmol, ref_conformer_n, alt_conformer_n):
-    """
-    # TODO merge this function into the one below
-    Translate alt_conformer IN PLACE to minimize the RMSD to ref_conformer.
-
-    Instead of providing conformers directly, we have to provide a mol and the conformer number.
-    """
-    # TODO merge this function into the one below
-    centroid_ref = rdMolTransforms.ComputeCentroid(ref_rmol.GetConformer(ref_conformer_n))
-    centroid_alt = rdMolTransforms.ComputeCentroid(alt_rmol.GetConformer(alt_conformer_n))
-    translation = centroid_ref - centroid_alt
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, 3] = translation
-    rdMolTransforms.TransformConformer(alt_rmol.GetConformer(alt_conformer_n), transformation_matrix)
-
-    # Return Tanimoto distance between the two conformers
-    shape_dist = rdShapeHelpers.ShapeTanimotoDist(ref_rmol, alt_rmol, confId1=ref_conformer_n,
-                                                  confId2=alt_conformer_n)
-    return shape_dist
 
 
 def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
@@ -334,20 +312,13 @@ def prepare_system_generator(ligand_mol=None, use_solvent=False):
     openmmforcefields.generators.SystemGenerator: The prepared system generator.
     """
 
-    if use_solvent:
-        assert ligand_mol is not None, "Must provide ligand_mol if use_solvent=True"
-        system_generator = SystemGenerator(
-            forcefields=[FORCEFIELD_PROTEIN, FORCEFIELD_SOLVENT],
-            small_molecule_forcefield=FORCEFIELD_SMALL_MOLECULE,
-            molecules=[ligand_mol],
-            forcefield_kwargs=FORCEFIELD_KWARGS)
-    else:
-        # TODO why is `molecules` not passed for use_solvent=False in tdudgeon/simulateComplex.py?
-        # is there any harm if it is?
-        system_generator = SystemGenerator(
-            forcefields=[FORCEFIELD_PROTEIN],
-            small_molecule_forcefield=FORCEFIELD_SMALL_MOLECULE,
-            forcefield_kwargs=FORCEFIELD_KWARGS)
+    # FIXFIX why is `molecules` not passed for use_solvent=False in tdudgeon/simulateComplex.py?
+    # is there any harm if it is?
+    system_generator = SystemGenerator(
+        forcefields=[FORCEFIELD_PROTEIN, FORCEFIELD_SOLVENT] if use_solvent else [FORCEFIELD_PROTEIN],
+        small_molecule_forcefield=FORCEFIELD_SMALL_MOLECULE,
+        molecules=[ligand_mol] if ligand_mol else [],
+        forcefield_kwargs=FORCEFIELD_KWARGS)
 
     return system_generator
 
@@ -384,7 +355,7 @@ def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str) -> pd.Dat
     rmsds_bck = md.rmsd(t, t, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False)
 
     df_traj = (pd.DataFrame([t.time, rmsds_bck, rmsds_lig]).T
-                 .applymap(lambda x: round(x, 8))
+                 .map(lambda x: round(x, 8))
                  .rename(columns={0:'time', 1:'rmsd_bck', 2:'rmsd_lig'}))
 
     df_traj.to_csv(output_traj_analysis, sep='\t', index=False)
@@ -474,7 +445,6 @@ def extract_pdbs_from_dcd(complex_pdb:str, trajectory_dcd:str) -> dict:
     return traj_pdbs
 
 
-
 def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
              use_solvent:bool=False, decoy_smiles:Union[str|None]=None, minimize_only:bool=False,
              temperature:float=PDB_TEMPERATURE,
@@ -520,26 +490,31 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     if num_steps is None:
         num_steps = 1
 
+    # A reasonable number based on the number of steps unless it's >1M steps
+    max_frames_to_report = 100
+    reporting_interval = min(10_000, num_steps // max_frames_to_report)
+
     print(f"Processing {pdb_in} and {mol_in} with {num_steps} steps")
 
     # -------------------------------------------------------
     # Set up system
     #
 
-    # A reasonable number based on the number of steps
-    max_frames_to_report = 100
-    reporting_interval = reporting_interval or 10**(len(str(num_steps // max_frames_to_report)))
-
     platform = get_platform()
 
-    print(f"# Preparing ligand:\n- {mol_in}\n")
-    ligand_rmol, ligand_mol = prepare_ligand_for_MD(mol_in)
-    ligand_conformer = ligand_mol.conformers[0]
-    assert len(ligand_mol.conformers) == len(ligand_rmol.GetConformers()) == 1, "reference ligand should have one conformer"
-
-    if decoy_smiles is not None:
+    if mol_in is not None:
+        print(f"# Preparing ligand:\n- {mol_in}\n")
+        print(mol_in)
+        print(mol_in is None)
+        print(type(mol_in))
+        ligand_rmol, ligand_mol = prepare_ligand_for_MD(mol_in)
+        ligand_conformer = ligand_mol.conformers[0]
+        assert len(ligand_mol.conformers) == len(ligand_rmol.GetConformers()) == 1, "reference ligand should have one conformer"
+    elif decoy_smiles is not None:
         ligand_rmol, ligand_mol, ligand_conformer = make_decoy(ligand_rmol, decoy_smiles)
         print(f"# Using decoy:\n- {ligand_mol}\n- {ligand_conformer}\n")
+    else:
+        ligand_rmol, ligand_mol, ligand_conformer = None, None, None
 
     # Initialize a SystemGenerator using the GAFF for the ligand and tip3p for the water.
     # Chat-GPT: To use a larger time step, artificially increase the mass of the hydrogens.
@@ -561,8 +536,9 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     # (and only) conformer and passes it to Modeller. It works. Don't ask why!
     # modeller.topology.setPeriodicBoxVectors([Vec3(x=8.461, y=0.0, z=0.0),
     # Vec3(x=0.0, y=8.461, z=0.0), Vec3(x=0.0, y=0.0, z=8.461)])
-    modeller.add(ligand_mol.to_topology().to_openmm(), ligand_mol.conformers[0].to_openmm())
-    print(f"- System has {modeller.topology.getNumAtoms()} atoms after adding ligand")
+    if ligand_mol is not None:
+        modeller.add(ligand_mol.to_topology().to_openmm(), ligand_mol.conformers[0].to_openmm())
+        print(f"- System has {modeller.topology.getNumAtoms()} atoms after adding ligand")
 
     if use_solvent:
         # We use the 'padding' option to define the periodic box. The PDB file does not contain any
@@ -574,8 +550,9 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     with open(output_complex_pdb, 'w', encoding='utf-8') as out:
         PDBFile.writeFile(modeller.topology, modeller.positions, out)
 
-    affinity = get_affinity(output_complex_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
-    out_affinity.write(f"complex\t{affinity:.4f}\n")
+    if ligand_mol is not None:
+        affinity = get_affinity(output_complex_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
+        out_affinity.write(f"complex\t{affinity:.4f}\n")
 
     # Create the system using the SystemGenerator
     system = system_generator.create_system(modeller.topology, molecules=ligand_mol)
@@ -608,9 +585,10 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
                           file=out,
                           keepIds=True)
 
-    affinity = get_affinity(output_minimized_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
-    out_affinity.write(f"min\t{affinity:.4f}\n")
-    out_affinity.flush()
+    if ligand_mol is not None:
+        affinity = get_affinity(output_minimized_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
+        out_affinity.write(f"min\t{affinity:.4f}\n")
+        out_affinity.flush()
 
     if minimize_only:
         return {"complex_pdb": output_complex_pdb,
@@ -646,17 +624,18 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     #
     print("# Calculating affinities along trajectory...")
     traj_pdbs = extract_pdbs_from_dcd(output_complex_pdb, output_traj_dcd)
-    traj_affinities = {time_ps: get_affinity(traj_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
-                       for time_ps, traj_pdb in traj_pdbs.items()}
-    for time_ps, affinity in traj_affinities.items():
-        out_affinity.write(f"{time_ps:.2f}\t{affinity:.4f}\n")
+    if ligand_mol is not None:
+        traj_affinities = {time_ps: get_affinity(traj_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
+                           for time_ps, traj_pdb in traj_pdbs.items()}
+        for time_ps, affinity in traj_affinities.items():
+            out_affinity.write(f"{time_ps:.2f}\t{affinity:.4f}\n")
 
     print("# Running trajectory analysis...")
     _ = analyze_traj(output_traj_dcd, output_complex_pdb, output_analysis_tsv)
 
     # Fix the state data file: from csv to tsv
     (pd.read_csv(output_state_tsv, sep=',')
-       .applymap(lambda x: round(x, 4) if isinstance(x, float) else x)
+       .map(lambda x: round(x, 4) if isinstance(x, float) else x)
        .to_csv(output_state_tsv, sep='\t', index=False))
 
     return {"complex_pdb": output_complex_pdb,

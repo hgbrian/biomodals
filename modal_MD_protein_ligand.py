@@ -1,11 +1,14 @@
+from datetime import datetime
 from pathlib import Path
-from shutil import copy
 from typing import Union
 
 from modal import Image, Mount, Stub
 
 FORCE_BUILD = False
+LOCAL_IN = "./in/md_protein_ligand"
 LOCAL_OUT = "./out/md_protein_ligand"
+REMOTE_IN = "/in"
+GPU = "T4"
 
 stub = Stub()
 
@@ -15,25 +18,27 @@ image = (Image
          .micromamba_install(["openmm=8.0.0", "openmmforcefields=0.11.2", "pdbfixer=1.9",
                               "rdkit=2023.03.1", "mdtraj=1.9.9", "plotly=4.9.0",
                               "openff-toolkit=0.14.3", "python-kaleido=0.2.1", "mdanalysis=2.5.0",
-                              "prody=2.4.0"],
+                              "prody=2.4.0", "pymol-open-source==2.5.0", "pypdb=2.3"],
                              channels=["omnia", "plotly", "conda-forge"])
-         .pip_install("git+https://github.com/hgbrian/MD_protein_ligand", force_build=FORCE_BUILD)
-         # Force the automatic smina and gnina downloads
-         .run_commands("python -c 'from MD_protein_ligand import simulate'")
+         # maybe replace with local? i am not sure
+         #.pip_install("git+https://github.com/hgbrian/MD_protein_ligand", force_build=FORCE_BUILD)
+         #.run_commands("python -c 'from MD_protein_ligand import simulate'")
         )
 
+with image.imports():
+    from MD_protein_ligand import simulate
 
-@stub.function(image=image, gpu="T4", timeout=60*15,
-               mounts=[Mount.from_local_dir((Path(".") / "input"), remote_path="/input")])
+
+@stub.function(image=image, gpu=GPU, timeout=60*15,
+               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
 def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
                        use_pdb_redo:bool, num_steps:Union[int,None], minimize_only:bool,
                        use_solvent:bool, decoy_smiles:Union[str,None], mutation:Union[str,None],
                        temperature:int, equilibration_steps:int, out_dir_root:str):
     """MD simulation of protein + ligand"""
 
-    from MD_protein_ligand import simulate
-    out_dir = str(Path(out_dir_root) / f"{pdb_id}_{ligand_id}")
-    out_stem = str(Path(out_dir) / f"{pdb_id}_{ligand_id}")
+    out_dir = str(Path(out_dir_root) / (f"{pdb_id}_{ligand_id}" if ligand_id else f"{pdb_id}"))
+    out_stem = str(Path(out_dir) / (f"{pdb_id}_{ligand_id}" if ligand_id else f"{pdb_id}"))
 
     #
     # Mutate a residue and relax again.
@@ -48,9 +53,9 @@ def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
                                                          out_dir=out_dir,
                                                          use_pdb_redo=use_pdb_redo,
                                                          mutation=(mutate_from, mutate_resn, mutate_to, mutate_chains)
-                                                                  if mutation else None)
+                                                                   if mutation else None)
 
-    sim_files = simulate.simulate(prepared_files["pdb"], prepared_files["sdf"], out_stem, num_steps,
+    sim_files = simulate.simulate(prepared_files["pdb"], prepared_files.get("sdf", None), out_stem, num_steps,
                                   minimize_only=minimize_only, use_solvent=use_solvent, decoy_smiles=decoy_smiles,
                                   temperature=temperature, equilibration_steps=equilibration_steps)
 
@@ -58,11 +63,13 @@ def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
     return {out_name: (fname, open(fname, 'rb').read() if Path(fname).exists() else None)
             for out_name, fname in (prepared_files | sim_files).items()}
 
+
 @stub.local_entrypoint()
-def main(pdb_id:str, ligand_id:str, ligand_chain:str,
+def main(pdb_id:str, ligand_id:str=None, ligand_chain:str=None,
          use_pdb_redo:bool=False, num_steps:int=None,
-         use_solvent:bool=True, decoy_smiles:str=None, mutation:str=None,
-         temperature:int=300, equilibration_steps:int=200, out_dir_root:str="."):
+         use_solvent:bool=False, decoy_smiles:str=None, mutation:str=None,
+         temperature:int=300, equilibration_steps:int=200, out_dir_date=True, 
+         out_dir_root:str="."):
     """
     MD simulation of protein + ligand.
 
@@ -82,17 +89,20 @@ def main(pdb_id:str, ligand_id:str, ligand_chain:str,
     """
 
     minimize_only = True if not num_steps else False
+    if ligand_id is not None:
+        assert ligand_chain is not None
 
-    # original
     outputs = simulate_md_ligand.remote(pdb_id, ligand_id, ligand_chain,
                                         use_pdb_redo, num_steps, minimize_only,
                                         use_solvent, decoy_smiles, mutation,
                                         temperature, equilibration_steps, out_dir_root)
 
+    out_dir_date = datetime.now().strftime("%Y%m%d%H%M")[2:] if out_dir_date else "."
+
     for (out_file, out_content) in outputs.values():
         if out_content:
-            (Path(LOCAL_OUT) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
-            with open(Path(LOCAL_OUT) / out_file, 'wb') as out:
+            (Path(LOCAL_OUT) / out_dir_date / out_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(Path(LOCAL_OUT) / out_dir_date / out_file, 'wb') as out:
                 out.write(out_content)
 
     print("Outputs:", {k:v[0] for k, v in outputs.items()})
