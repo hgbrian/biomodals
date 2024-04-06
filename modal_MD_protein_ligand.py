@@ -15,9 +15,9 @@ stub = Stub()
 image = (Image
          .micromamba(python_version="3.10")
          .apt_install("git", "wget")
-         .micromamba_install(["openmm=8.0.0", "openmmforcefields=0.11.2", "pdbfixer=1.9",
+         .micromamba_install(["openmm=8.1.1", "openmmforcefields=0.12.0", "openmm-ml=1.1", "pdbfixer=1.9",
                               "rdkit=2023.03.1", "mdtraj=1.9.9", "plotly=4.9.0",
-                              "openff-toolkit=0.14.3", "python-kaleido=0.2.1", "mdanalysis=2.5.0",
+                              "openff-toolkit=0.15.2", "python-kaleido=0.2.1", "mdanalysis=2.5.0",
                               "prody=2.4.0", "pymol-open-source==2.5.0", "pypdb=2.3"],
                              channels=["omnia", "plotly", "conda-forge"])
          # maybe replace with local? i am not sure
