@@ -320,7 +320,8 @@ def prepare_system_generator(ligand_mol=None, use_solvent=False):
     return system_generator
 
 
-def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str) -> pd.DataFrame:
+def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str,
+                 ligand_chain_id="1", backbone_chain_id="0") -> pd.DataFrame:
     """
     Analyze trajectory for RMSD of backbone and ligand using mdtraj.
 
@@ -342,14 +343,15 @@ def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str) -> pd.Dat
     """
 
     t = md.load(traj_in, top=topol_in)
-    lig_atoms = t.topology.select("chainid 1")
+
+    lig_atoms = t.topology.select(f"chainid {ligand_chain_id}")
     rmsds_lig = md.rmsd(t, t, frame=0, atom_indices=lig_atoms, parallel=True, precentered=False)
-    bb_atoms = t.topology.select("chainid 0 and backbone")
+
+    bb_atoms = t.topology.select(f"chainid {backbone_chain_id} and backbone")
+    rmsds_bck = md.rmsd(t, t, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False)
 
     print(f"Topology:\n- {t.topology} with n_frames={t.n_frames}\n- {len(lig_atoms)} ligand atoms"
           f"\n- rmsds_lig {rmsds_lig}\n- {len(bb_atoms)} backbone atoms")
-
-    rmsds_bck = md.rmsd(t, t, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False)
 
     df_traj = (pd.DataFrame([t.time, rmsds_bck, rmsds_lig]).T
                  .map(lambda x: round(x, 8))

@@ -1,3 +1,5 @@
+import os
+
 from datetime import datetime
 from pathlib import Path
 from typing import Union
@@ -8,7 +10,7 @@ FORCE_BUILD = False
 LOCAL_IN = "./in/md_protein_ligand"
 LOCAL_OUT = "./out/md_protein_ligand"
 REMOTE_IN = "/in"
-GPU = "T4"
+GPU = os.environ.get("MODAL_GPU", "T4") # T4 for testing
 
 app = App()
 
@@ -56,7 +58,6 @@ def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
     if mutation is not None:
         mutate_from, mutate_resn, mutate_to, mutate_chains = mutation.split("-")
         out_stem = (f"{out_stem}_{mutate_from}_{mutate_resn}_{mutate_to}_{mutate_chains}")
-
 
     prepared_files = simulate.get_pdb_and_extract_ligand(pdb_file_remote or pdb_id, ligand_id, ligand_chain,
                                                          out_dir=out_dir,
