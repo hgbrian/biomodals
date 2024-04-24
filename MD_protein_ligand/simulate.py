@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import time
+from shutil import copy2
 from tempfile import NamedTemporaryFile
 from typing import Union
 from pathlib import Path
@@ -36,12 +37,10 @@ try:
 except ImportError:
     from extract_ligands import extract_ligand
 
-SMINA, SMINA_BIN = "smina", "./bin/smina"
 GNINA, GNINA_BIN = "gnina", "./bin/gnina"
 OBABEL, OBABEL_BIN = "obabel", "obabel"
-SMINA_LINUX_URL = "https://sourceforge.net/projects/smina/files/smina.static/download"
 GNINA_LINUX_URL = "https://github.com/gnina/gnina/releases/download/v1.0.3/gnina"
-binaries = {SMINA: SMINA_BIN, GNINA: GNINA_BIN, OBABEL: OBABEL_BIN}
+binaries = {GNINA: GNINA_BIN, OBABEL: OBABEL_BIN}
 
 PDB_PH = 7.4
 PDB_TEMPERATURE = 300 * unit.kelvin
@@ -67,7 +66,7 @@ OPENMM_DEFAULT_LIGAND_ID = "UNK"
 def _download_binary_if_missing(binary_name:str):
     def _download(path, url):
         """download binary"""
-        print(f"Downloading {binary_name} binary (10Mb for smina, 300Mb for gnina)")
+        print(f"Downloading {binary_name} binary (300Mb for gnina)")
         with requests.get(url, timeout=600, stream=True) as r:
             r.raise_for_status()
             os.makedirs(Path(path).parent, exist_ok=True)
@@ -78,12 +77,9 @@ def _download_binary_if_missing(binary_name:str):
         print(f"Downloaded {binary_name} binary\n")
         return True
 
-    if binary_name == SMINA and not Path(SMINA_BIN).exists():
-        _download(SMINA_BIN, SMINA_LINUX_URL)
-    elif binary_name == GNINA and not Path(GNINA_BIN).exists():
+    if binary_name == GNINA and not Path(GNINA_BIN).exists():
         _download(GNINA_BIN, GNINA_LINUX_URL)
 
-_download_binary_if_missing(SMINA)
 _download_binary_if_missing(GNINA)
 
 
@@ -197,12 +193,13 @@ def get_pdb_and_extract_ligand(pdb_id:str,
     Returns:
     filename_dict (dict): a dict of the files produced
     """
-
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     if pdb_id.endswith(".pdb"):
-        pdb_file = pdb_id
-        pdb_id = Path(pdb_file).stem
+        pdb_file = str(Path(out_dir) / f"{Path(pdb_id).stem}.pdb")
+        copy2(pdb_id, pdb_file)
+        pdb_id = Path(pdb_id).stem
+        print("YES pdb_id", pdb_id)
     elif use_pdb_redo:
         pdb_file = str(Path(out_dir) / f"{pdb_id}_pdbredo.pdb")
         subprocess.run(f"wget -O {pdb_file} https://pdb-redo.eu/db/{pdb_id}/{pdb_id}_final.pdb",
@@ -366,50 +363,50 @@ def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str) -> pd.Dat
 def get_affinity(pdb_in:str, ligand_id:str, convert_to_pdbqt:bool=False,
                  scoring_tool:str=GNINA) -> float:
     """
-    Calculates the predicted binding affinity of a molecule to a protein using smina.
+    Calculates the predicted binding affinity of a molecule to a protein using gnina.
     The lower the binding affinity, the stronger the expected binding.
 
-    Due to a weird intermittent bug in smina/gnina, allow conversion of the
+    Due to a weird intermittent bug in gnina, allow conversion of the
     PDB file to PDBQT format with obabel. I am still unclear on what's going on here.
 
     Parameters:
     pdb_in (str): The path to the input protein+ligand PDB file.
     ligand_id (str): The id of the ligand within the PDB file.
-    convert_to_pdbqt (bool): If True, convert the PDB file to PDBQT format before running smina.
+    convert_to_pdbqt (bool): If True, convert the PDB file to PDBQT format before running gnina.
         Defaults to False.
-    scoring_tool (str): Pose scoring tool to use. Can be 'smina' or 'gnina'. Defaults to 'gnina'.
+    scoring_tool (str): Defaults to 'gnina'.
 
     Returns:
     float: The predicted binding affinity of the ligand to the protein.
     """
-    smina_affinity_pattern = r"Affinity:\s*([\-\.\d+]+)"
+    gnina_affinity_pattern = r"Affinity:\s*([\-\.\d+]+)"
 
-    with (NamedTemporaryFile('w', suffix="_ligand.pdb", delete=False) as smina_ligand_pdb,
-          NamedTemporaryFile('w', suffix="_protein.pdb", delete=False) as smina_protein_pdb,
-          NamedTemporaryFile('w', suffix="_protein.pdbqt", delete=False) as smina_protein_pdbqt):
+    with (NamedTemporaryFile('w', suffix="_ligand.pdb", delete=False) as gnina_ligand_pdb,
+          NamedTemporaryFile('w', suffix="_protein.pdb", delete=False) as gnina_protein_pdb,
+          NamedTemporaryFile('w', suffix="_protein.pdbqt", delete=False) as gnina_protein_pdbqt):
         for line in open(pdb_in, encoding='utf-8'):
             if line.startswith("HETATM") and line[17:20] == ligand_id or line.startswith("CONECT"):
-                smina_ligand_pdb.write(line)
+                gnina_ligand_pdb.write(line)
             elif not line.startswith("HETATM"):
-                smina_protein_pdb.write(line)
-        smina_ligand_pdb.flush()
-        smina_ligand_pdb.seek(0)
-        smina_protein_pdb.flush()
-        smina_protein_pdb.seek(0)
+                gnina_protein_pdb.write(line)
+        gnina_ligand_pdb.flush()
+        gnina_ligand_pdb.seek(0)
+        gnina_protein_pdb.flush()
+        gnina_protein_pdb.seek(0)
 
         # convert pdb to pdbqt too to get flexible side chains? In theory MD sorts this out
         if convert_to_pdbqt:
-            cmd = (f"{binaries[OBABEL]} {smina_protein_pdb.name} -O {smina_protein_pdbqt.name} && "
+            cmd = (f"{binaries[OBABEL]} {gnina_protein_pdb.name} -O {gnina_protein_pdbqt.name} && "
                    f"{binaries[scoring_tool]} --cpu {max(1, os.cpu_count()-1)} --score_only "
-                   f"-r {smina_protein_pdbqt.name} -l {smina_ligand_pdb.name}")
+                   f"-r {gnina_protein_pdbqt.name} -l {gnina_ligand_pdb.name}")
         else:
             cmd = (f"{binaries[scoring_tool]} --cpu {max(1, os.cpu_count()-1)} --score_only "
-                   f"-r {smina_protein_pdb.name} -l {smina_ligand_pdb.name}")
+                   f"-r {gnina_protein_pdb.name} -l {gnina_ligand_pdb.name}")
 
         print(f"- Calculating score: {cmd}")
-        smina_out = subprocess.run(cmd, check=True, shell=True, capture_output=True).stdout.decode('ascii')
+        gnina_out = subprocess.run(cmd, check=True, shell=True, capture_output=True).stdout.decode('ascii')
 
-    affinity = float(re.findall(smina_affinity_pattern, smina_out)[0])
+    affinity = float(re.findall(gnina_affinity_pattern, gnina_out)[0])
 
     return affinity
 
@@ -554,7 +551,6 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
         affinity = get_affinity(output_complex_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
         out_affinity.write(f"complex\t{affinity:.4f}\n")
 
-    # Create the system using the SystemGenerator
     system = system_generator.create_system(modeller.topology, molecules=ligand_mol)
 
     integrator = LangevinIntegrator(temperature, FRICTION_COEFF, STEP_SIZE)

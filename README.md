@@ -7,7 +7,6 @@ pip install modal
 python3 -m modal setup
 ```
 
-
 ## OmegaFold
 
 Runs `omegafold --model 2 <fasta>`
@@ -17,6 +16,7 @@ This can run out of memory, and may need an 80GB A100.
 ```
 modal run modal_omegafold.py --input-fasta in/omegafold/insulin.faa
 ```
+
 ## minimap2 (short reads example)
 
 Runs `minimap2 -ax sr <fasta> <reads>`
