@@ -36,7 +36,7 @@ with image.imports():
                mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
 def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
                        use_pdb_redo:bool, num_steps:Union[int,None], minimize_only:bool,
-                       use_solvent:bool, decoy_smiles:Union[str,None], mutation:Union[str,None],
+                       use_solvent:bool, decoy_smiles:Union[str,None], mutations:Union[list,None],
                        temperature:int, equilibration_steps:int, out_dir_root:str):
     """MD simulation of protein + ligand"""
 
@@ -55,15 +55,16 @@ def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
     # Mutate prepared_files["pdb"] to ensure consistency
     # e.g., LEU-117-VAL-AB, following PDBFixer format (but adding chains)
     #
-    if mutation is not None:
-        mutate_from, mutate_resn, mutate_to, mutate_chains = mutation.split("-")
-        out_stem = (f"{out_stem}_{mutate_from}_{mutate_resn}_{mutate_to}_{mutate_chains}")
+    for mutation in mutations or []:
+        mut_from, mut_resn, mut_to, mut_chains = mutation.split("-")
+        out_stem += f"_{mut_from}_{mut_resn}_{mut_to}_{mut_chains}"
 
-    prepared_files = simulate.get_pdb_and_extract_ligand(pdb_file_remote or pdb_id, ligand_id, ligand_chain,
+    prepared_files = simulate.get_pdb_and_extract_ligand(pdb_file_remote or pdb_id,
+                                                         ligand_id,
+                                                         ligand_chain,
                                                          out_dir=out_dir,
                                                          use_pdb_redo=use_pdb_redo,
-                                                         mutation=(mutate_from, mutate_resn, mutate_to, mutate_chains)
-                                                                   if mutation else None)
+                                                         mutations=mutations)
 
     sim_files = simulate.simulate(prepared_files["pdb"], prepared_files.get("sdf", None), out_stem, num_steps,
                                   minimize_only=minimize_only, use_solvent=use_solvent, decoy_smiles=decoy_smiles,
@@ -77,7 +78,7 @@ def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
 @app.local_entrypoint()
 def main(pdb_id:str, ligand_id:str=None, ligand_chain:str=None,
          use_pdb_redo:bool=False, num_steps:int=None,
-         use_solvent:bool=False, decoy_smiles:str=None, mutation:str=None,
+         use_solvent:bool=False, decoy_smiles:str=None, mutations:str=None,
          temperature:int=300, equilibration_steps:int=200, out_dir_date=True, 
          out_dir_root:str="."):
     """
@@ -104,7 +105,8 @@ def main(pdb_id:str, ligand_id:str=None, ligand_chain:str=None,
 
     outputs = simulate_md_ligand.remote(pdb_id, ligand_id, ligand_chain,
                                         use_pdb_redo, num_steps, minimize_only,
-                                        use_solvent, decoy_smiles, mutation,
+                                        use_solvent, decoy_smiles,
+                                        mutations.split(',') if mutations else None,
                                         temperature, equilibration_steps, out_dir_root)
 
     out_dir_date = datetime.now().strftime("%Y%m%d%H%M")[2:] if out_dir_date else "."

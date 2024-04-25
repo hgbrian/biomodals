@@ -55,6 +55,7 @@ BAROSTAT_FREQUENCY = 25
 FORCEFIELD_KWARGS = {'constraints': app.HBonds, 'rigidWater': True,
                      'removeCMMotion': False, 'hydrogenMass': 4*unit.amu}
 FORCEFIELD_PROTEIN = "amber/ff14SB.xml"
+FORCEFIELD_IMPLICIT_SOLVENT = "implicit/obc2.xml"
 FORCEFIELD_SOLVENT = "amber/tip3p_standard.xml"
 FORCEFIELD_SMALL_MOLECULE = "gaff-2.11"
 
@@ -97,7 +98,7 @@ def get_platform():
 
 
 def prepare_protein(in_pdb_file:str, out_pdb_file:str, minimize_pdb:bool=False,
-                    mutation:tuple|None=None) -> bool:
+                    mutations:list|None=None) -> bool:
     """
     Prepare a protein for simulation using pdbfixer and optionally minimize it using openmm.
 
@@ -123,8 +124,9 @@ def prepare_protein(in_pdb_file:str, out_pdb_file:str, minimize_pdb:bool=False,
     """
 
     fixer = PDBFixer(filename=in_pdb_file)
-    if mutation is not None:
-        for chain in mutation[3]:
+    for mutation in mutations or []:
+        mutation = mutation.split('-')
+        for chain in mutation[3]: # e.g., AB
             fixer.applyMutations([f"{mutation[0]}-{mutation[1]}-{mutation[2]}"], chain)
     fixer.findMissingResidues()
     fixer.findMissingAtoms()
@@ -174,7 +176,7 @@ def get_pdb_and_extract_ligand(pdb_id:str,
                                out_dir:str='.',
                                use_pdb_redo:bool=False,
                                minimize_pdb:bool=False,
-                               mutation:tuple|None=None) -> dict:
+                               mutations:list|None=None) -> dict:
     """
     Download a PDB file, prepare it for MD, and extract a ligand.
 
@@ -199,7 +201,6 @@ def get_pdb_and_extract_ligand(pdb_id:str,
         pdb_file = str(Path(out_dir) / f"{Path(pdb_id).stem}.pdb")
         copy2(pdb_id, pdb_file)
         pdb_id = Path(pdb_id).stem
-        print("YES pdb_id", pdb_id)
     elif use_pdb_redo:
         pdb_file = str(Path(out_dir) / f"{pdb_id}_pdbredo.pdb")
         subprocess.run(f"wget -O {pdb_file} https://pdb-redo.eu/db/{pdb_id}/{pdb_id}_final.pdb",
@@ -211,7 +212,7 @@ def get_pdb_and_extract_ligand(pdb_id:str,
 
     # FIXFIX is it ok to prepare_protein BEFORE extracting the ligand?
     prepared_pdb_file = str(Path(out_dir) / f"{pdb_id}_fixed.pdb")
-    prepare_protein(pdb_file, prepared_pdb_file, minimize_pdb=minimize_pdb, mutation=mutation)
+    prepare_protein(pdb_file, prepared_pdb_file, minimize_pdb=minimize_pdb, mutations=mutations)
 
     if ligand_id is None: # then extract nothing, just prepare the protein
         return {"original_pdb": pdb_file, "pdb": prepared_pdb_file}
@@ -312,7 +313,8 @@ def prepare_system_generator(ligand_mol=None, use_solvent=False):
     # FIXFIX why is `molecules` not passed for use_solvent=False in tdudgeon/simulateComplex.py?
     # is there any harm if it is?
     system_generator = SystemGenerator(
-        forcefields=[FORCEFIELD_PROTEIN, FORCEFIELD_SOLVENT] if use_solvent else [FORCEFIELD_PROTEIN],
+        forcefields=([FORCEFIELD_PROTEIN, FORCEFIELD_SOLVENT] if use_solvent else
+                     [FORCEFIELD_PROTEIN, FORCEFIELD_IMPLICIT_SOLVENT]),
         small_molecule_forcefield=FORCEFIELD_SMALL_MOLECULE,
         molecules=[ligand_mol] if ligand_mol else [],
         forcefield_kwargs=FORCEFIELD_KWARGS)
@@ -320,7 +322,7 @@ def prepare_system_generator(ligand_mol=None, use_solvent=False):
     return system_generator
 
 
-def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str,
+def analyze_traj(traj_dcd: str, topol_in:str, output_traj_analysis:str,
                  ligand_chain_id="1", backbone_chain_id="0") -> pd.DataFrame:
     """
     Analyze trajectory for RMSD of backbone and ligand using mdtraj.
@@ -342,18 +344,25 @@ def analyze_traj(traj_in: str, topol_in:str, output_traj_analysis:str,
                       and 'rmsd_lig' (RMSD of the ligand).
     """
 
-    t = md.load(traj_in, top=topol_in)
+    traj = md.load(traj_dcd, top=topol_in)
 
-    lig_atoms = t.topology.select(f"chainid {ligand_chain_id}")
-    rmsds_lig = md.rmsd(t, t, frame=0, atom_indices=lig_atoms, parallel=True, precentered=False)
+    # re-output the trajectory with the ligand superimposed on the first frame
+    traj.superpose(traj, 0)
+    traj.save_dcd(traj_dcd)
 
-    bb_atoms = t.topology.select(f"chainid {backbone_chain_id} and backbone")
-    rmsds_bck = md.rmsd(t, t, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False)
+    lig_atoms = traj.topology.select(f"chainid {ligand_chain_id}")
+    rmsds_lig = md.rmsd(traj, traj, frame=0, atom_indices=lig_atoms, parallel=True, precentered=False)
 
-    print(f"Topology:\n- {t.topology} with n_frames={t.n_frames}\n- {len(lig_atoms)} ligand atoms"
-          f"\n- rmsds_lig {rmsds_lig}\n- {len(bb_atoms)} backbone atoms")
+    # and backbond constrains it to only the backbone atoms, not sidechains
+    bb_atoms = traj.topology.select(f"chainid {backbone_chain_id} and backbone")
+    rmsds_bck = md.rmsd(traj, traj, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False)
 
-    df_traj = (pd.DataFrame([t.time, rmsds_bck, rmsds_lig]).T
+    print(f"Topology:\n"
+          f"- {traj.topology} with n_frames={traj.n_frames}\n"
+          f"- {len(lig_atoms)} ligand atoms\n"
+          f"- {len(bb_atoms)} backbone atoms")
+
+    df_traj = (pd.DataFrame([traj.time, rmsds_bck, rmsds_lig]).T
                  .map(lambda x: round(x, 8))
                  .rename(columns={0:'time', 1:'rmsd_bck', 2:'rmsd_lig'}))
 
@@ -503,9 +512,6 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
 
     if mol_in is not None:
         print(f"# Preparing ligand:\n- {mol_in}\n")
-        print(mol_in)
-        print(mol_in is None)
-        print(type(mol_in))
         ligand_rmol, ligand_mol = prepare_ligand_for_MD(mol_in)
         ligand_conformer = ligand_mol.conformers[0]
         assert len(ligand_mol.conformers) == len(ligand_rmol.GetConformers()) == 1, "reference ligand should have one conformer"
@@ -611,7 +617,7 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
                                                   step=True, potentialEnergy=True,
                                                   temperature=True))
 
-    print(f"Starting simulation with {num_steps} steps ...")
+    print(f"# Starting simulation with {num_steps} steps ...")
     time_0 = time.time()
     simulation.step(num_steps)
     time_1 = time.time()
