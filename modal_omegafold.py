@@ -1,55 +1,61 @@
-"""Run OmegaFold on a fasta file.
+"""Run OmegaFold on an amino acid fasta file to produce a pdb file.
 
-If it runs out of memory, try changing GPU to "80GB".
+Default to 80GB since I have seen failures at 40GB.
 """
 
-import glob
-
-from subprocess import run
+import os
 from pathlib import Path
+from subprocess import run
 
 import modal
-from modal import Image, Mount, Stub
+from modal import App, Image, Mount
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/omegafold"
 LOCAL_OUT = "./out/omegafold"
 REMOTE_IN = "/in"
-GPU = modal.gpu.A100(size="40GB")
+REMOTE_OUT = LOCAL_OUT
+GPU_SIZE = os.environ.get("MODAL_GPU_SIZE", "80GB")
+GPU = modal.gpu.A100(size=GPU_SIZE)
+TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
+app = App()
 
-stub = Stub()
+image = (
+    Image.debian_slim()
+    .apt_install("git")
+    .pip_install("git+https://github.com/HeliXonProtein/OmegaFold.git@cd8b5adb5e71672f13e6226b5c7fb010560a07de", force_build=FORCE_BUILD)
+)
 
-image = (Image
-         .debian_slim()
-         .apt_install("git")
-         .pip_install("git+https://github.com/HeliXonProtein/OmegaFold.git", force_build=FORCE_BUILD)
-        )
 
-@stub.function(image=image, gpu=GPU, timeout=60*15,
-               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
-def omegafold(input_fasta:str, subbatch_size:int) -> list[str, str]:
+@app.function(
+    image=image,
+    gpu=GPU,
+    timeout=60 * TIMEOUT_MINS,
+    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+)
+def omegafold(input_fasta: str, subbatch_size: int) -> list[str, str]:
     input_fasta = Path(input_fasta).relative_to(LOCAL_IN)
     assert input_fasta.suffix in (".faa", ".fasta"), f"not a fasta file: {input_fasta}"
 
     Path(LOCAL_OUT).mkdir(parents=True, exist_ok=True)
 
-    run(["omegafold",
-         "--model", "2",
-         "--subbatch_size", str(subbatch_size),
-         Path(REMOTE_IN) / input_fasta.name,
-         LOCAL_OUT
-         ], check=True)
+    run(
+        f"omegafold --model 2 --subbatch_size {subbatch_size} {Path(REMOTE_IN) / input_fasta.name} {REMOTE_OUT}",
+        shell=True,
+        check=True,
+    )
 
-    return [(pdb_file, open(pdb_file, "rb").read())
-            for pdb_file in glob.glob(f"{LOCAL_OUT}/**/*.pdb", recursive=True)]
+    return [
+        (pdb_file, open(pdb_file, "rb").read()) for pdb_file in Path(REMOTE_OUT).glob("**/*.pdb")
+    ]
 
-@stub.local_entrypoint()
-def main(input_fasta, subbatch_size:int=224):
+
+@app.local_entrypoint()
+def main(input_fasta, subbatch_size: int = 224):
     outputs = omegafold.remote(input_fasta, subbatch_size)
 
-    for (out_file, out_content) in outputs:
+    for out_file, out_content in outputs:
         Path(out_file).parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open(out_file, 'wb') as out:
+            with open(out_file, "wb") as out:
                 out.write(out_content)
-
