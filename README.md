@@ -74,5 +74,14 @@ A tool for annotating antibody sequences https://github.com/oxpig/ANARCI
 modal run modal_anarci.py --input-fasta in/anarci/antibody.faa
 ```
 
-## TODO
-- unify file input / output in some sensible way
+## MD_protein_ligand
+Basic MD
+```
+modal run modal_MD_protein_ligand.py --pdb-id in/md_protein_ligand/1A1O_reordered.pdb
+```
+
+Basic MD protein + ligand
+```
+modal run modal_md_protein_ligand.py --pdb-id 4O75 --ligand-id 2RC --ligand-chain A
+```
+
