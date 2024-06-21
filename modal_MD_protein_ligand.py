@@ -1,43 +1,70 @@
 import os
-
 from datetime import datetime
 from pathlib import Path
 from typing import Union
 
-from modal import Image, Mount, App
+from modal import App, Image, Mount
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/md_protein_ligand"
 LOCAL_OUT = "./out/md_protein_ligand"
 REMOTE_IN = "/in"
-GPU = os.environ.get("MODAL_GPU", "T4") # T4 for testing
+GPU = os.environ.get("MODAL_GPU", "T4")  # T4 for testing
+TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
 
 app = App()
 
-image = (Image
-         .micromamba(python_version="3.10")
-         .apt_install("git", "wget")
-         .micromamba_install(["openmm=8.1.1", "openmmforcefields=0.12.0", "openmm-ml=1.1",
-                              "nnpops=0.6", "openff-toolkit=0.15.2", "pdbfixer=1.9",
-                              "rdkit=2023.03.1", "mdtraj=1.9.9", "plotly=4.9.0",
-                              "python-kaleido=0.2.1", "mdanalysis=2.5.0",
-                              "prody=2.4.0", "pymol-open-source==2.5.0", "pypdb=2.3"],
-                             channels=["omnia", "plotly", "conda-forge"])
-         # maybe replace with local? i am not sure
-         #.pip_install("git+https://github.com/hgbrian/MD_protein_ligand", force_build=FORCE_BUILD)
-         #.run_commands("python -c 'from MD_protein_ligand import simulate'")
-        )
+image = (
+    Image.micromamba(python_version="3.10")
+    .apt_install("git", "wget")
+    .micromamba_install(
+        [
+            "openmm=8.1.1",
+            "openmmforcefields=0.12.0",
+            "openmm-ml=1.1",
+            "nnpops=0.6",
+            "openff-toolkit=0.15.2",
+            "pdbfixer=1.9",
+            "rdkit=2023.03.1",
+            "mdtraj=1.9.9",
+            "plotly=4.9.0",
+            "python-kaleido=0.2.1",
+            "mdanalysis=2.5.0",
+            "prody=2.4.0",
+            "pymol-open-source==2.5.0",
+            "pypdb=2.3",
+        ],
+        channels=["omnia", "plotly", "conda-forge"],
+    )
+    # maybe replace with local? i am not sure
+    # .pip_install("git+https://github.com/hgbrian/MD_protein_ligand", force_build=FORCE_BUILD)
+    # .run_commands("python -c 'from MD_protein_ligand import simulate'")
+)
 
 with image.imports():
     from MD_protein_ligand import simulate
 
 
-@app.function(image=image, gpu=GPU, timeout=60*15,
-               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
-def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
-                       use_pdb_redo:bool, num_steps:Union[int,None], minimize_only:bool,
-                       use_solvent:bool, decoy_smiles:Union[str,None], mutations:Union[list,None],
-                       temperature:int, equilibration_steps:int, out_dir_root:str):
+@app.function(
+    image=image,
+    gpu=GPU,
+    timeout=60 * TIMEOUT_MINS,
+    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+)
+def simulate_md_ligand(
+    pdb_id: str,
+    ligand_id: str,
+    ligand_chain: str,
+    use_pdb_redo: bool,
+    num_steps: Union[int, None],
+    minimize_only: bool,
+    use_solvent: bool,
+    decoy_smiles: Union[str, None],
+    mutations: Union[list, None],
+    temperature: int,
+    equilibration_steps: int,
+    out_dir_root: str,
+):
     """MD simulation of protein + ligand"""
 
     if pdb_id.endswith(".pdb"):
@@ -59,28 +86,49 @@ def simulate_md_ligand(pdb_id:str, ligand_id:str, ligand_chain:str,
         mut_from, mut_resn, mut_to, mut_chains = mutation.split("-")
         out_stem += f"_{mut_from}_{mut_resn}_{mut_to}_{mut_chains}"
 
-    prepared_files = simulate.get_pdb_and_extract_ligand(pdb_file_remote or pdb_id,
-                                                         ligand_id,
-                                                         ligand_chain,
-                                                         out_dir=out_dir,
-                                                         use_pdb_redo=use_pdb_redo,
-                                                         mutations=mutations)
+    prepared_files = simulate.get_pdb_and_extract_ligand(
+        pdb_file_remote or pdb_id,
+        ligand_id,
+        ligand_chain,
+        out_dir=out_dir,
+        use_pdb_redo=use_pdb_redo,
+        mutations=mutations,
+    )
 
-    sim_files = simulate.simulate(prepared_files["pdb"], prepared_files.get("sdf", None), out_stem, num_steps,
-                                  minimize_only=minimize_only, use_solvent=use_solvent, decoy_smiles=decoy_smiles,
-                                  temperature=temperature, equilibration_steps=equilibration_steps)
+    sim_files = simulate.simulate(
+        prepared_files["pdb"],
+        prepared_files.get("sdf", None),
+        out_stem,
+        num_steps,
+        minimize_only=minimize_only,
+        use_solvent=use_solvent,
+        decoy_smiles=decoy_smiles,
+        temperature=temperature,
+        equilibration_steps=equilibration_steps,
+    )
 
     # read in the output files
-    return {out_name: (fname, open(fname, 'rb').read() if Path(fname).exists() else None)
-            for out_name, fname in (prepared_files | sim_files).items()}
+    return {
+        out_name: (fname, open(fname, "rb").read() if Path(fname).exists() else None)
+        for out_name, fname in (prepared_files | sim_files).items()
+    }
 
 
 @app.local_entrypoint()
-def main(pdb_id:str, ligand_id:str=None, ligand_chain:str=None,
-         use_pdb_redo:bool=False, num_steps:int=None,
-         use_solvent:bool=False, decoy_smiles:str=None, mutations:str=None,
-         temperature:int=300, equilibration_steps:int=200, out_dir_date=True, 
-         out_dir_root:str="."):
+def main(
+    pdb_id: str,
+    ligand_id: str = None,
+    ligand_chain: str = None,
+    use_pdb_redo: bool = False,
+    num_steps: int = None,
+    use_solvent: bool = False,
+    decoy_smiles: str = None,
+    mutations: str = None,
+    temperature: int = 300,
+    equilibration_steps: int = 200,
+    out_dir_date=True,
+    out_dir_root: str = ".",
+):
     """
     MD simulation of protein + ligand.
 
@@ -103,18 +151,27 @@ def main(pdb_id:str, ligand_id:str=None, ligand_chain:str=None,
     if ligand_id is not None:
         assert ligand_chain is not None
 
-    outputs = simulate_md_ligand.remote(pdb_id, ligand_id, ligand_chain,
-                                        use_pdb_redo, num_steps, minimize_only,
-                                        use_solvent, decoy_smiles,
-                                        mutations.split(',') if mutations else None,
-                                        temperature, equilibration_steps, out_dir_root)
+    outputs = simulate_md_ligand.remote(
+        pdb_id,
+        ligand_id,
+        ligand_chain,
+        use_pdb_redo,
+        num_steps,
+        minimize_only,
+        use_solvent,
+        decoy_smiles,
+        mutations.split(",") if mutations else None,
+        temperature,
+        equilibration_steps,
+        out_dir_root,
+    )
 
     out_dir_date = datetime.now().strftime("%Y%m%d%H%M")[2:] if out_dir_date else "."
 
-    for (out_file, out_content) in outputs.values():
+    for out_file, out_content in outputs.values():
         if out_content:
             (Path(LOCAL_OUT) / out_dir_date / out_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(Path(LOCAL_OUT) / out_dir_date / out_file, 'wb') as out:
+            with open(Path(LOCAL_OUT) / out_dir_date / out_file, "wb") as out:
                 out.write(out_content)
 
-    print("Outputs:", {k:v[0] for k, v in outputs.items()})
+    print("Outputs:", {k: v[0] for k, v in outputs.items()})
