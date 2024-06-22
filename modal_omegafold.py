@@ -23,7 +23,7 @@ app = App()
 image = (
     Image.debian_slim()
     .apt_install("git")
-    .pip_install("git+https://github.com/HeliXonProtein/OmegaFold.git@cd8b5adb5e71672f13e6226b5c7fb010560a07de", force_build=FORCE_BUILD)
+    .pip_install("git+https://github.com/HeliXonProtein/OmegaFold.git", force_build=FORCE_BUILD)
 )
 
 
