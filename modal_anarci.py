@@ -7,10 +7,10 @@ usage: ANARCI [-h] [--sequence INPUTSEQUENCE] [--outfile OUTFILE] [--scheme {m,c
               [--assign_germline] [--use_species {human,mouse,rat,rabbit,rhesus,pig,alpaca,cow}] [--bit_score_threshold BIT_SCORE_THRESHOLD]
 """
 
-from subprocess import run
 from pathlib import Path
+from subprocess import run
 
-from modal import Image, Mount, App
+from modal import App, Image, Mount
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/anarci"
@@ -18,38 +18,41 @@ LOCAL_OUT = "./out/anarci"
 REMOTE_IN = "/in"
 REMOTE_OUT = LOCAL_OUT
 
-app = App()
 
 image = (
     Image.micromamba()
     .apt_install("git")
-    .pip_install("biopython")
+    .pip_install(["biopython"], force_build=FORCE_BUILD)
     .micromamba_install(["libstdcxx-ng", "hmmer=3.3.2"], channels=["conda-forge", "bioconda"])
     .run_commands(
         "git clone https://github.com/oxpig/ANARCI && cd ANARCI && python setup.py install"
     )
 )
 
+app = App("anarci", image=image)
+
 
 @app.function(
-    image=image,
     timeout=60 * 15,
     mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
-def anarci(input_fasta: str, kwargs_str: str) -> list[str, str]:
-    input_fasta = Path(input_fasta).relative_to(LOCAL_IN)
-    assert input_fasta.suffix in (".faa", ".fasta"), f"not a fasta file: {input_fasta}"
-
+def anarci(input_fasta: str, params: str = None) -> list[str, str]:
     Path(REMOTE_OUT).mkdir(parents=True, exist_ok=True)
 
-    command = (
-        f"ANARCI -i {str(Path(REMOTE_IN) / input_fasta)} "
-        f"--outfile {str(Path(REMOTE_OUT) / Path(input_fasta).stem)} "
-        "--csv --ncpu 2"
-    )
+    if (Path(LOCAL_IN) / input_fasta).exists():
+        assert input_fasta.suffix in (".faa", ".fasta"), f"not a fasta file: {v}"
+        input = Path(REMOTE_IN) / Path(input_fasta).relative_to(LOCAL_IN)
+        output = Path(REMOTE_OUT) / Path(input_fasta).stem
+    else:
+        input = input_fasta
+        output = Path(REMOTE_OUT) / input[:8]
 
-    if kwargs_str is not None:
-        command += " " + kwargs_str
+    command = f"ANARCI -i {input} --outfile {output}"
+
+    if params is not None:
+        command += " " + params
+    else:
+        command += " --csv --ncpu 2"
 
     run(command, shell=True, check=True)
 
@@ -57,8 +60,8 @@ def anarci(input_fasta: str, kwargs_str: str) -> list[str, str]:
 
 
 @app.local_entrypoint()
-def main(input_fasta, kwargs_str=None):
-    outputs = anarci.remote(input_fasta, kwargs_str)
+def main(input_fasta, params=None):
+    outputs = anarci.remote(input_fasta, params)
 
     for out_file, out_content in outputs:
         Path(out_file).parent.mkdir(parents=True, exist_ok=True)
