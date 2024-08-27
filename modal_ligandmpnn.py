@@ -2,18 +2,19 @@
 LigandMPNN (superseding ProteinMPNN)
 https://github.com/dauparas/LigandMPNN
 
+- By default, calc_score is False, because it's quite slow.
+
 ## Example EGFR binder
 - Design chain C but include chains A and C
 
 ```
-modal run modal_ligandmpnn.py --input-pdb in/ligandmpnn/1IVO_edited.pdb \
+modal run modal_ligandmpnn.py --input-pdb in/ligandmpnn/1IVO_edited.pdb --extract-chains AC \
 --params-str '--seed 1 --checkpoint_protein_mpnn "/LigandMPNN/model_params/proteinmpnn_v_48_020.pt" \
---chains_to_design "C"'
+--chains_to_design "C" --save_stats 1'
 ```
 
 ## Example EGFR binder
 - Outputs will have only chain C
-- Save sequence design statistics
 - 15 sequences total (3x5)
 
 ```
@@ -21,6 +22,7 @@ modal run modal_ligandmpnn.py --input-pdb in/ligandmpnn/1IVO_edited.pdb \
 --params-str '--seed 1 --checkpoint_protein_mpnn "/LigandMPNN/model_params/proteinmpnn_v_48_020.pt" \
 --parse_these_chains_only "C" --save_stats 1 --batch_size 3 --number_of_batches 5'
 ```
+
 """
 
 from pathlib import Path
@@ -85,15 +87,30 @@ image = (
 app = App("LigandMPNN", image=image)
 
 
+def extract_chains_inplace(pdb_file: str, extract_chains: str):
+    from prody import parsePDB, writePDB
+
+    chains = parsePDB(pdb_file, chain=extract_chains.replace(",", ""))
+    writePDB(pdb_file, chains)
+    return pdb_file
+
+
 @app.function(timeout=60 * 15, gpu=GPU)
 def ligandmpnn(
-    input_pdb_str: str, input_pdb_name: str, params_str: str, score_params_str: str
+    input_pdb_str: str,
+    input_pdb_name: str,
+    params_str: str = None,
+    calc_score: bool = False,
+    score_params_str: str = None,
+    extract_chains: str = None,
 ) -> list[str, str]:
     from subprocess import run
-    
+
     out_dir = "./out"
 
     open(input_pdb_name, "w").write(input_pdb_str)
+    if extract_chains is not None:
+        input_pdb_name = extract_chains_inplace(input_pdb_name, extract_chains)
 
     # --------------------------------------------------------------------------
     # Run LigandMPNN
@@ -101,7 +118,9 @@ def ligandmpnn(
     #
     ckpt = "/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"
     if params_str is None:
-        params_str = f'--seed 1 --save_stats 1 --model_type "protein_mpnn" --checkpoint_protein_mpnn {ckpt}'
+        params_str = (
+            f'--seed 1 --save_stats 1 --model_type "protein_mpnn" --checkpoint_protein_mpnn {ckpt}'
+        )
 
     cmd = f'python /LigandMPNN/run.py --pdb_path "{input_pdb_name}" --out_folder "{out_dir}" {params_str}'
     print(cmd)
@@ -109,22 +128,21 @@ def ligandmpnn(
 
     # --------------------------------------------------------------------------
     # Score the output from LigandMPNN
+    # Defaults from https://github.com/dauparas/LigandMPNN, not sure what some of these do
     #
-    if score_params_str is None:
-        # from https://github.com/dauparas/LigandMPNN, not sure what some of these do
-        score_params_str = (
-            f' --seed 111 --model_type "protein_mpnn" --checkpoint_protein_mpnn {ckpt}'
-            " --single_aa_score 1 --use_sequence 1 --batch_size 1 --number_of_batches 10"
-        )
+    if calc_score:
+        if score_params_str is None:
+            score_params_str = (
+                f' --seed 111 --model_type "protein_mpnn" --checkpoint_protein_mpnn {ckpt}'
+                " --single_aa_score 1 --use_sequence 1 --batch_size 1 --number_of_batches 10"
+            )
 
-        backbones = list((Path(out_dir) / "backbones").glob("*.pdb"))
-        if len(backbones) > 1:
-            print(f"Found >1 backbones, using first for scoring: {backbones}")
-        score_params_str += f' --pdb_path "{backbones[0]}"'
+        for backbone in (Path(out_dir) / "backbones").glob("*.pdb"):
+            score_params_str_ = score_params_str + f' --pdb_path "{backbone}"'
 
-    cmd_score = f'python /LigandMPNN/score.py --out_folder "{out_dir}" {score_params_str}'
-    print(cmd_score)
-    run(cmd_score, shell=True, capture_output=True, check=True)
+            cmd_score = f'python /LigandMPNN/score.py --out_folder "{out_dir}" {score_params_str_}'
+            print(cmd_score)
+            run(cmd_score, shell=True, capture_output=True, check=True)
 
     return [
         (out_file.relative_to(out_dir), open(out_file, "rb").read())
@@ -133,12 +151,20 @@ def ligandmpnn(
 
 
 @app.local_entrypoint()
-def main(input_pdb: str, params_str: str = None, score_params_str: str = None):
+def main(
+    input_pdb: str,
+    params_str: str = None,
+    calc_score: bool = False,
+    score_params_str: str = None,
+    extract_chains: str = None,
+):
     from datetime import datetime
 
     input_pdb_str = open(input_pdb).read()
 
-    outputs = ligandmpnn.remote(input_pdb_str, Path(input_pdb).name, params_str, score_params_str)
+    outputs = ligandmpnn.remote(
+        input_pdb_str, Path(input_pdb).name, params_str, calc_score, score_params_str, extract_chains
+    )
 
     today = datetime.today().strftime("%Y%m%d%H%M")[2:]
 
