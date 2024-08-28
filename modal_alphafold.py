@@ -18,12 +18,8 @@ image = (
     Image.debian_slim(python_version="3.11")
     .micromamba()
     .apt_install("wget", "git")
-    .pip_install(
-        "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold"
-    )
-    .micromamba_install(
-        "kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"]
-    )
+    .pip_install("colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold")
+    .micromamba_install("kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"])
     .run_commands(
         'pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
         gpu="a100",
@@ -97,7 +93,7 @@ def alphafold(
     num_recycles: int = 3,
     binder_len: int = None,
     target_len: int = None,
-    return_zip_only: bool = True,
+    return_all_files: bool = False,
 ):
     import json
     import zipfile
@@ -160,7 +156,7 @@ def alphafold(
     return [
         (out_file.relative_to(out_dir), open(out_file, "rb").read())
         for out_file in Path(out_dir).glob("**/*.*")
-        if (not return_zip_only or Path(out_file).suffix == ".zip")
+        if (return_all_files or Path(out_file).suffix == ".zip")
     ]
 
 
@@ -172,6 +168,7 @@ def main(
     binder_len: int = None,
     target_len: int = None,
     local_out: str = ".",
+    return_all_files: bool = True,
 ):
     fasta_str = open(input_fasta).read()
     models = [int(model) for model in models.split(",")]
@@ -183,6 +180,7 @@ def main(
         num_recycles=num_recycles,
         binder_len=binder_len,
         target_len=target_len,
+        return_all_files=return_all_files,
     )
 
     for out_file, out_content in outputs:
