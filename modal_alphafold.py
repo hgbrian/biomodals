@@ -168,7 +168,7 @@ def main(
     binder_len: int = None,
     target_len: int = None,
     local_out: str = ".",
-    return_all_files: bool = True,
+    return_all_files: bool = False,
 ):
     fasta_str = open(input_fasta).read()
     models = [int(model) for model in models.split(",")]
