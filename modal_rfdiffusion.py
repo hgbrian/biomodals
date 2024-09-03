@@ -35,17 +35,18 @@ import glob
 from subprocess import run
 from pathlib import Path
 
-from modal import Image, Mount, Stub
+from modal import Image, Mount, App
 
 FORCE_BUILD = False
-MODAL_IN = "./modal_in/rfdiffusion"
-MODAL_OUT = "./modal_out"
+MODAL_IN = "./in/rfdiffusion"
+MODAL_OUT = "./out"
 OUTPUT_ROOT = "rfdiffusion"
 
-stub = Stub()
+app = App()
+
 
 image = (Image
-         .debian_slim()
+         .micromamba(python_version="3.9")
          .apt_install("git", "wget", "aria2")
          .run_commands("mkdir params;"
                        "aria2c -q -x 16 https://files.ipd.uw.edu/krypton/schedules.zip;"
@@ -56,7 +57,7 @@ image = (Image
                        "touch params/done.txt;")
          .run_commands("git clone https://github.com/sokrypton/RFdiffusion.git")
          .pip_install(["jedi", "omegaconf", "hydra-core", "icecream", "pyrsistent"])
-         .pip_install(["dgl==1.0.2+cu116"], find_links="https://data.dgl.ai/wheels/cu116/repo.html")
+         .pip_install(["dgl==1.0.2+cu117"], find_links="https://data.dgl.ai/wheels/cu117/repo.html")
          .run_commands("cd RFdiffusion/env/SE3Transformer;"
                        "pip -q install --no-cache-dir -r requirements.txt;"
                        "pip -q install .")
@@ -70,17 +71,21 @@ image = (Image
                        "unzip schedules.zip;"
                        "rm schedules.zip;")
          .run_commands("mv /RFdiffusion/* /root")
-        )
+         .pip_install(["torch==1.13.1+cu117", "torchvision==0.14.1+cu117"], index_url="https://download.pytorch.org/whl/cu117")
+         .micromamba_install("libcusparse=11", channels=["nvidia"])
+         .env({"LD_LIBRARY_PATH": "/opt/conda/lib/python3.9/site-packages/nvidia/curand/lib/:/opt/conda/pkgs/libcusparse-11.7.5.86-0/lib:/usr/local/cuda/lib64"})
+)
 
 # ColabDesign imports
-import os
-import json
-import random
-import signal
-import string
-import time
-import numpy as np
-import matplotlib.pyplot as plt
+with image.imports():
+    import os
+    import json
+    import random
+    import signal
+    import string
+    import time
+    import numpy as np
+    import matplotlib.pyplot as plt
 
 
 def get_pdb(pdb_code):
@@ -402,7 +407,7 @@ def designability_test(contigs, path, copies, num_designs,
     run(["python", "colabdesign/rf/designability_test.py", opts], check=True)
 
 
-@stub.function(image=image, gpu="T4", timeout=60*15,
+@app.function(image=image, gpu="T4", timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
 def rfdiffusion(contigs:str, pdb:str,
                 iterations:int=25,
@@ -463,7 +468,7 @@ def rfdiffusion(contigs:str, pdb:str,
             if os.path.isfile(outfile)]
 
 
-@stub.local_entrypoint()
+@app.local_entrypoint()
 def main(pdb:str, contigs:str,
          name:str='',
          iterations:int=25):
