@@ -37,7 +37,6 @@ from pathlib import Path
 
 from modal import Image, Mount, App
 
-FORCE_BUILD = False
 MODAL_IN = "./in/rfdiffusion"
 MODAL_OUT = "./out"
 OUTPUT_ROOT = "rfdiffusion"
@@ -85,7 +84,6 @@ with image.imports():
     import string
     import time
     import numpy as np
-    import matplotlib.pyplot as plt
 
 
 def get_pdb(pdb_code):
@@ -481,4 +479,3 @@ def main(pdb:str, contigs:str,
         if out_content:
             with open(out_path, 'wb') as out:
                 out.write(out_content)
-
