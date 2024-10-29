@@ -1,16 +1,21 @@
 """
 adapting
 https://colab.research.google.com/github/martinpacesa/BindCraft/blob/main/notebooks/BindCraft.ipynb
+
+Approximate cost for 3 designs, PDL1.pdb only:
+- A10G = $2, 1.5h
+- A100 = $3, 1h
+- H100 = $4, 40m
 """
 
 import os
-
 from pathlib import Path
 
 from modal import App, Image
 
-GPU = os.environ.get("GPU", "A100")
-
+GPU = os.environ.get("GPU", "A10G")
+TIMEOUT = os.environ.get("TIMEOUT", 360)
+print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
 def set_up_pyrosetta():
     import pyrosettacolabsetup
@@ -45,7 +50,7 @@ image = (
 app = App("bindcraft", image=image)
 
 
-@app.function(image=image, gpu=GPU, timeout=60 * 120)
+@app.function(image=image, gpu=GPU, timeout=TIMEOUT * 60)
 def bindcraft(
     design_path,
     binder_name,
@@ -65,42 +70,40 @@ def bindcraft(
 
     import numpy as np
     import pandas as pd
-
-    starting_pdb = f"/tmp/bindcraft/{binder_name}.pdb"  # @param {"type":"string","placeholder":"/content/bindcraft/example/PDL1.pdb"}
-    Path(starting_pdb).parent.mkdir(parents=True, exist_ok=True)
-    open(starting_pdb, 'w').write(pdb_str)
-
-    # @title Import functions and settings
     from bindcraft.functions import (
-        check_jax_gpu,
-        load_af2_models,
-        load_json_settings,
-        generate_directories,
-        generate_dataframe_labels,
-        create_dataframe,
-        generate_filter_pass_csv,
-        pr,
-        check_accepted_designs,
-        check_n_trajectories,
-        load_helicity,
-        pr_relax,
         binder_hallucination,
-        copy_dict,
-        calculate_clash_score,
-        validate_design_sequence,
-        unaligned_rmsd,
-        insert_data,
-        mpnn_gen_sequence,
-        clear_mem,
-        calculate_averages,
-        mk_afdesign_model,
-        save_fasta,
-        masked_binder_predict,
-        predict_binder_alone,
-        score_interface,
-        check_filters,
         calc_ss_percentage,
+        calculate_averages,
+        calculate_clash_score,
+        check_accepted_designs,
+        check_filters,
+        check_jax_gpu,
+        check_n_trajectories,
+        clear_mem,
+        copy_dict,
+        create_dataframe,
+        generate_dataframe_labels,
+        generate_directories,
+        generate_filter_pass_csv,
+        insert_data,
+        load_af2_models,
+        load_helicity,
+        load_json_settings,
+        masked_binder_predict,
+        mk_afdesign_model,
+        mpnn_gen_sequence,
+        pr,
+        pr_relax,
+        predict_binder_alone,
+        save_fasta,
+        score_interface,
+        unaligned_rmsd,
+        validate_design_sequence,
     )
+
+    starting_pdb = f"/tmp/bindcraft/{binder_name}.pdb"
+    Path(starting_pdb).parent.mkdir(parents=True, exist_ok=True)
+    open(starting_pdb, "w").write(pdb_str)
 
     settings = {
         "design_path": design_path,
@@ -883,8 +886,7 @@ def bindcraft(
         + elapsed_text
     )
 
-    # @title Consolidate & Rank Designs
-    # @markdown ---
+    # Consolidate & Rank Designs
     accepted_binders = [f for f in os.listdir(design_paths["Accepted"]) if f.endswith(".pdb")]
 
     for f in os.listdir(design_paths["Accepted/Ranked"]):
@@ -919,11 +921,6 @@ def bindcraft(
     # save the final_df to final_csv
     final_df.to_csv(final_csv, index=False)
 
-    print("Designs ranked and final_designs_stats.csv generated")
-
-    df = pd.read_csv(os.path.join(design_path, "final_design_stats.csv"))
-    df.head(20)
-
     out_dir = design_path
     return [
         (out_file.relative_to(out_dir), open(out_file, "rb").read())
@@ -932,42 +929,35 @@ def bindcraft(
 
 
 @app.local_entrypoint()
-def main(input_pdb, out_dir="./out/bindcraft"):
+def main(
+    input_pdb: str,
+    chains: str = "A",
+    target_hotspot_residues: str = "",
+    lengths: str = "40,100",
+    number_of_final_designs: int = 3,
+    binder_name:str = None,
+    out_dir: str = "./out/bindcraft",
+):
+    """
+    target_hotspot_residues: What positions to target in your protein of interest? For example 1,2-10 or chain specific A1-10,B1-20 or entire chains A. If left blank, an appropriate site will be selected by the pipeline.
+    """
     from datetime import datetime
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
 
     pdb_str = open(input_pdb).read()
-
-    # @markdown Enter the name that should be prefixed to your binders (generally target name).
-    binder_name = Path(input_pdb).stem
-
+    binder_name = binder_name or Path(input_pdb).stem
     design_path = f"/tmp/BindCraft/{binder_name}/"
-    Path(design_path).mkdir(parents=True, exist_ok=True)
-
-    # @markdown The path to the .pdb structure of your target. Can be an experimental or AlphaFold2 structure. We recommend trimming the structure to as small as needed, as the whole selected chains will be backpropagated through the network and can significantly increase running times.
-    #starting_pdb = "/root/bindcraft/example/PDL1.pdb"  # @param {"type":"string","placeholder":"/content/bindcraft/example/PDL1.pdb"}
-
-    # @markdown Which chains of your PDB to target? Can be one or multiple, in a comma-separated format. Other chains will be ignored during design.
-    chains = "A"  # @param {"type":"string","placeholder":"A,C"}
-
-    # @markdown What positions to target in your protein of interest? For example `1,2-10` or chain specific `A1-10,B1-20` or entire chains `A`. If left blank, an appropriate site will be selected by the pipeline.
-    target_hotspot_residues = ""  # @param {"type":"string","placeholder":""}
-
-    # @markdown What is the minimum and maximum size of binders you want to design? Pipeline will randomly sample different sizes between these values.
-    lengths = [40, 80]  # @param {"type":"string","placeholder":"70,150"}
-
-    # @markdown How many binder designs passing filters do you require?
-    number_of_final_designs = 10  # @param {"type":"integer","placeholder":"100"}
+    lengths = [int(i) for i in lengths.split(",")]
 
     outputs = bindcraft.remote(
-        design_path,
-        binder_name,
-        pdb_str,
-        chains,
-        target_hotspot_residues,
-        lengths,
-        number_of_final_designs,
+        design_path=design_path,
+        binder_name=binder_name,
+        pdb_str=pdb_str,
+        chains=chains,
+        target_hotspot_residues=target_hotspot_residues,
+        lengths=lengths,
+        number_of_final_designs=number_of_final_designs,
     )
 
     for out_file, out_content in outputs:
