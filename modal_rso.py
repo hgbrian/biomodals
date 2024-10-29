@@ -29,7 +29,7 @@ image = (
     )
 )
 
-app = modal.App("rso-app", image=image)
+app = modal.App("rso", image=image)
 
 
 @app.function(
@@ -45,8 +45,11 @@ def ros(pdb_name, pdb_str, traj_iters, binder_len):
     import jax.numpy as jnp
     from colabdesign.af.alphafold.common import residue_constants
 
+    import pandas as pd
+
     pdb_path = str(Path("/tmp/in_rso") / pdb_name)
     Path(pdb_path).parent.mkdir(parents=True, exist_ok=True)
+
     with open(pdb_path, "w") as f:
         f.write(pdb_str)
 
@@ -92,7 +95,7 @@ def ros(pdb_name, pdb_str, traj_iters, binder_len):
     binder_model = mk_afdesign_model(protocol="binder", use_multimer=True, use_initial_guess=True)
     monomer_model = mk_afdesign_model(protocol="fixbb")
 
-    binder_model.set_weights(i_pae=1.0)
+    # binder_model.set_weights(i_pae=1.0)
 
     mpnn_model = mk_mpnn_model(weights="soluble")
     mpnn_model.prep_inputs(pdb_filename="backbone.pdb", chain="A,B", fix_pos="A", rm_aa="C")
@@ -107,24 +110,32 @@ def ros(pdb_name, pdb_str, traj_iters, binder_len):
         rm_template_ic=True,
     )
 
-    # ??????
+    results_df = pd.DataFrame()
+
+    # output results
     for j, seq in enumerate(samples["seq"]):
         print("Predicting binder only")
         monomer_model.predict(seq=seq[-binder_len:], num_recycles=3)
         if monomer_model.aux["losses"]["rmsd"] < 2.0:
             print("Passed! Predicting binder with receptor using AF Multimer")
             binder_model.predict(seq=seq[-binder_len:], num_recycles=3)
-            plddt1 = binder_model.aux["losses"]["plddt"]
-            i_pae = binder_model.aux["losses"]["i_pae"]
+
             # if plddt1 < 0.15 and i_pae < 0.4:
             if True:
-                print(f"Passed! Final I_PAE is {i_pae*31}")
                 binder_model.save_pdb(f"binder_design_{j}.pdb")
+                results_df.loc[j, "pdb_id"] = f"binder_design_{j}.pdb"
+                results_df.loc[j, "seq"] = seq[-binder_len:]
+                for key in binder_model.aux["log"]:
+                    results_df.loc[j, key] = binder_model.aux["log"][key]
+                for weight in af_model.opt["weights"]:
+                    results_df.loc[j, f"weights_{key}"] = weight
+
+    results_df.to_csv("binder_design_scores.csv", index=False)
 
     return [
-        (str(pdb_file), open(pdb_file, "rb").read())
-        for pdb_file in Path(".").glob("**/*")
-        if Path(pdb_file).is_file()
+        (str(out_file), open(out_file, "rb").read())
+        for out_file in Path(".").glob("**/*")
+        if Path(out_file).is_file()
     ]
 
 
@@ -151,7 +162,6 @@ def main(
         )
 
         for out_file, out_content in outputs:
-            print(out_dir, today, bb_num, out_file)
             (Path(out_dir) / today / str(bb_num) / out_file).parent.mkdir(
                 parents=True, exist_ok=True
             )
