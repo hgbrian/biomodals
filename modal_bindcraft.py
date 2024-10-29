@@ -14,7 +14,7 @@ from pathlib import Path
 from modal import App, Image
 
 GPU = os.environ.get("GPU", "A10G")
-TIMEOUT = os.environ.get("TIMEOUT", 360)
+TIMEOUT = os.environ.get("TIMEOUT", 720)
 print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
 def set_up_pyrosetta():
@@ -934,7 +934,7 @@ def main(
     chains: str = "A",
     target_hotspot_residues: str = "",
     lengths: str = "40,100",
-    number_of_final_designs: int = 3,
+    number_of_final_designs: int = 1,
     binder_name:str = None,
     out_dir: str = "./out/bindcraft",
 ):
