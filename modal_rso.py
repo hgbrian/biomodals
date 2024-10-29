@@ -1,3 +1,7 @@
+"""
+adapted from https://github.com/coreyhowe999/RSO
+"""
+
 import modal
 import os
 from datetime import datetime  # Add this import
