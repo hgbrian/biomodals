@@ -14,7 +14,7 @@ from pathlib import Path
 from modal import App, Image
 
 GPU = os.environ.get("GPU", "A10G")
-TIMEOUT = os.environ.get("TIMEOUT", 720)
+TIMEOUT = int(os.environ.get("TIMEOUT", 720))
 print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
 def set_up_pyrosetta():
