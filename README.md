@@ -85,3 +85,10 @@ Basic MD protein + ligand
 modal run modal_md_protein_ligand.py --pdb-id 4O75 --ligand-id 2RC --ligand-chain A
 ```
 
+## BindCraft
+
+Basic PDL1 binder (example from https://github.com/martinpacesa/BindCraft)
+```
+wget https://raw.githubusercontent.com/martinpacesa/BindCraft/refs/heads/main/example/PDL1.pdb
+GPU=A100 modal run modal_bindcraft.py --input-pdb PDL1.pdb --number-of-final-designs 1
+```
