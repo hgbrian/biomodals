@@ -137,6 +137,7 @@ def rso(pdb_name, pdb_str, traj_iters, binder_len):
         (str(out_file), open(out_file, "rb").read())
         for out_file in Path(".").glob("**/*")
         if Path(out_file).is_file()
+        if Path(out_file).suffix != ".npz"
     ]
 
 
@@ -152,19 +153,13 @@ def main(
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-    for bb_num in range(num_designs):
-        print(f"Starting design for {input_pdb}")
+    all_outputs = rso.starmap(
+        [(Path(input_pdb).name, pdb_str, traj_iters, binder_len) for _ in range(num_designs)]
+    )
 
-        outputs = rso.remote(
-            pdb_name=Path(input_pdb).name,
-            pdb_str=pdb_str,
-            traj_iters=traj_iters,
-            binder_len=binder_len,
-        )
-
+    for bb_num, outputs in enumerate(all_outputs):
         for out_file, out_content in outputs:
-            (Path(out_dir) / today / str(bb_num) / out_file).parent.mkdir(
-                parents=True, exist_ok=True
-            )
-            with open(Path(out_dir) / today / str(bb_num) / out_file, "wb") as out:
+            output_path = Path(out_dir) / today / str(bb_num) / out_file
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "wb") as out:
                 out.write(out_content)
