@@ -8,6 +8,7 @@ from datetime import datetime  # Add this import
 from pathlib import Path
 
 GPU = os.environ.get("MODAL_GPU", "A100")
+TIMEOUT = int(os.environ.get("TIMEOUT", 180))
 
 image = (
     modal.Image.debian_slim()
@@ -35,9 +36,9 @@ app = modal.App("rso", image=image)
 @app.function(
     image=image,
     gpu=GPU,
-    timeout=3600,
+    timeout=TIMEOUT * 60,
 )
-def ros(pdb_name, pdb_str, traj_iters, binder_len):
+def rso(pdb_name, pdb_str, traj_iters, binder_len):
     # Import colabdesign modules here
     from colabdesign import mk_afdesign_model, clear_mem
     from colabdesign.mpnn import mk_mpnn_model
@@ -154,7 +155,7 @@ def main(
     for bb_num in range(num_designs):
         print(f"Starting design for {input_pdb}")
 
-        outputs = ros.remote(
+        outputs = rso.remote(
             pdb_name=Path(input_pdb).name,
             pdb_str=pdb_str,
             traj_iters=traj_iters,
