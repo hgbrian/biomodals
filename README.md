@@ -93,6 +93,12 @@ wget https://raw.githubusercontent.com/martinpacesa/BindCraft/refs/heads/main/ex
 GPU=A100 modal run modal_bindcraft.py --input-pdb PDL1.pdb --number-of-final-designs 1
 ```
 
+# nextflow
+Minimal hello world app, with conda and nextflow installed (not trivial!)
+```
+modal run modal_nextflow_example.py
+```
+
 ## Other modal repos
 
 - [RNA Seq Pipeline](https://github.com/tdsone/modal-rna-seq-pipeline) by @tdsone
