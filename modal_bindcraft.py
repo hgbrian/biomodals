@@ -202,16 +202,17 @@ def bindcraft(
     filters_file = os.path.basename(filters_path).split(".")[0]
     advanced_file = os.path.basename(advanced_path).split(".")[0]
 
+    advanced_settings["af_params_dir"] = "/root/bindcraft/params/"
+    advanced_settings["dssp_path"] = "/root/bindcraft/functions/dssp"
+    advanced_settings["dalphaball_path"] = "/root/bindcraft/functions/DAlphaBall.gcc"
+
     ### load AF2 model settings
     design_models, prediction_models, multimer_validation = load_af2_models(
         advanced_settings["use_multimer_design"]
     )
 
     ### perform checks on advanced_settings
-    bindcraft_folder = "colab"
-    advanced_settings = perform_advanced_settings_check(
-        advanced_settings, bindcraft_folder
-    )
+    advanced_settings = perform_advanced_settings_check(advanced_settings)
 
     ### generate directories, design path names can be found within the function
     design_paths = generate_directories(target_settings["design_path"])
