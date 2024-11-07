@@ -17,16 +17,21 @@ GPU = os.environ.get("GPU", "A10G")
 TIMEOUT = int(os.environ.get("TIMEOUT", 720))
 print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
+
 def set_up_pyrosetta():
     import pyrosettacolabsetup
 
-    pyrosettacolabsetup.install_pyrosetta(serialization=True, cache_wheel_on_google_drive=False)
+    pyrosettacolabsetup.install_pyrosetta(
+        serialization=True, cache_wheel_on_google_drive=False
+    )
 
 
 image = (
     Image.debian_slim()
     .apt_install("git", "wget", "aria2", "ffmpeg")
-    .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
+    .pip_install(
+        "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
+    )
     .pip_install("git+https://github.com/sokrypton/ColabDesign.git")
     .pip_install("pyrosettacolabsetup")
     .run_commands(
@@ -59,8 +64,10 @@ def bindcraft(
     target_hotspot_residues,
     lengths,
     number_of_final_designs,
+    design_protocol="Default",
+    interface_protocol="AlphaFold2",
+    template_protocol="Default",
     filter_option="Default",
-    advanced_option="Default",
 ):
     import json
     import os
@@ -92,11 +99,13 @@ def bindcraft(
         masked_binder_predict,
         mk_afdesign_model,
         mpnn_gen_sequence,
+        perform_advanced_settings_check, 
         pr,
         pr_relax,
         predict_binder_alone,
         save_fasta,
         score_interface,
+        target_pdb_rmsd,
         unaligned_rmsd,
         validate_design_sequence,
     )
@@ -120,23 +129,53 @@ def bindcraft(
     with open(target_settings_path, "w") as f:
         json.dump(settings, f, indent=4)
 
+    # Advanced settings
+    if design_protocol == "Default":
+        design_protocol_tag = "default_4stage_multimer"
+    elif design_protocol == "Beta-sheet":
+        design_protocol_tag = "betasheet_4stage_multimer"
+    elif design_protocol == "Peptide":
+        design_protocol_tag = "peptide_3stage_multimer"
+    else:
+        raise ValueError(f"Unsupported design protocol")
+
+    if interface_protocol == "AlphaFold2":
+        interface_protocol_tag = ""
+    elif interface_protocol == "MPNN":
+        interface_protocol_tag = "_mpnn"
+    else:
+        raise ValueError(f"Unsupported interface protocol")
+
+    if template_protocol == "Default":
+        template_protocol_tag = ""
+    elif template_protocol == "Masked":
+        template_protocol_tag = "_flexible"
+    else:
+        raise ValueError(f"Unsupported template protocol")
+
+    advanced_settings_path = (
+        "/root/bindcraft/settings_advanced/"
+        + design_protocol_tag
+        + interface_protocol_tag
+        + template_protocol_tag
+        + ".json"
+    )
+
+    # Filters
     if filter_option == "Default":
         filter_settings_path = "/root/bindcraft/settings_filters/default_filters.json"
+    elif filter_option == "Peptide":
+        filter_settings_path = "/root/bindcraft/settings_filters/peptide_filters.json"
+    elif filter_option == "Relaxed":
+        filter_settings_path = "/root/bindcraft/settings_filters/relaxed_filters.json"
+    elif filter_option == "Peptide_Relaxed":
+        filter_settings_path = (
+            "/root/bindcraft/settings_filters/peptide_relaxed_filters.json"
+        )
     elif filter_option == "None":
         filter_settings_path = "/root/bindcraft/settings_filters/no_filters.json"
-    elif filter_option == "Peptide":
-        filter_settings_path = "/root/bindcraft/settings_filters/filters_peptides.json"
     else:
-        raise ValueError("Unsupported filter type")
-
-    if advanced_option == "Default":
-        advanced_settings_path = "/root/bindcraft/settings_advanced/4stage_multimer.json"
-    elif advanced_option == "Beta-sheet":
-        advanced_settings_path = "/root/bindcraft/settings_advanced/4stage_multimer_betasheet.json"
-    elif advanced_option == "Peptide":
-        advanced_settings_path = "/root/bindcraft/settings_advanced/4stage_multimer_peptides.json"
-    else:
-        raise ValueError("Unsupported protocol")
+        raise ValueError(f"Unsupported filter type")
 
     args = {
         "settings": target_settings_path,
@@ -154,28 +193,35 @@ def bindcraft(
         args["advanced"],
     )
 
+    ### load settings from JSON
     target_settings, advanced_settings, filters = load_json_settings(
         settings_path, filters_path, advanced_path
     )
+
     settings_file = os.path.basename(settings_path).split(".")[0]
     filters_file = os.path.basename(filters_path).split(".")[0]
     advanced_file = os.path.basename(advanced_path).split(".")[0]
-
-    advanced_settings["af_params_dir"] = "/root/bindcraft/params/"
-    advanced_settings["dssp_path"] = "/root/bindcraft/functions/dssp"
-    advanced_settings["dalphaball_path"] = "/root/bindcraft/functions/DAlphaBall.gcc"
 
     ### load AF2 model settings
     design_models, prediction_models, multimer_validation = load_af2_models(
         advanced_settings["use_multimer_design"]
     )
 
+    ### perform checks on advanced_settings
+    bindcraft_folder = "/root/bindcraft/"
+    advanced_settings = perform_advanced_settings_check(
+        advanced_settings, bindcraft_folder
+    )
+
+    ### generate directories, design path names can be found within the function
     design_paths = generate_directories(target_settings["design_path"])
 
     ### generate dataframes
     trajectory_labels, design_labels, final_labels = generate_dataframe_labels()
 
-    trajectory_csv = os.path.join(target_settings["design_path"], "trajectory_stats.csv")
+    trajectory_csv = os.path.join(
+        target_settings["design_path"], "trajectory_stats.csv"
+    )
     mpnn_csv = os.path.join(target_settings["design_path"], "mpnn_design_stats.csv")
     final_csv = os.path.join(target_settings["design_path"], "final_design_stats.csv")
     failure_csv = os.path.join(target_settings["design_path"], "failure_csv.csv")
@@ -199,7 +245,6 @@ def bindcraft(
     script_start_time = time.time()
     trajectory_n = 1
     accepted_designs = 0
-    rejected_designs = 0
 
     ### start design loop
     while True:
@@ -232,14 +277,18 @@ def bindcraft(
         seed = int(np.random.randint(0, high=999999, size=1, dtype=int)[0])
 
         # sample binder design length randomly from defined distribution
-        samples = np.arange(min(target_settings["lengths"]), max(target_settings["lengths"]) + 1)
+        samples = np.arange(
+            min(target_settings["lengths"]), max(target_settings["lengths"]) + 1
+        )
         length = np.random.choice(samples)
 
         # load desired helicity value to sample different secondary structure contents
         helicity_value = load_helicity(advanced_settings)
 
         # generate design name and check if same trajectory was already run
-        design_name = target_settings["binder_name"] + "_l" + str(length) + "_s" + str(seed)
+        design_name = (
+            target_settings["binder_name"] + "_l" + str(length) + "_s" + str(seed)
+        )
         trajectory_dirs = [
             "Trajectory",
             "Trajectory/Relaxed",
@@ -247,7 +296,9 @@ def bindcraft(
             "Trajectory/Clashing",
         ]
         trajectory_exists = any(
-            os.path.exists(os.path.join(design_paths[trajectory_dir], design_name + ".pdb"))
+            os.path.exists(
+                os.path.join(design_paths[trajectory_dir], design_name + ".pdb")
+            )
             for trajectory_dir in trajectory_dirs
         )
 
@@ -271,11 +322,14 @@ def bindcraft(
             trajectory_metrics = copy_dict(
                 trajectory.aux["log"]
             )  # contains plddt, ptm, i_ptm, pae, i_pae
-            trajectory_pdb = os.path.join(design_paths["Trajectory"], design_name + ".pdb")
+            trajectory_pdb = os.path.join(
+                design_paths["Trajectory"], design_name + ".pdb"
+            )
 
             # round the metrics to two decimal places
             trajectory_metrics = {
-                k: round(v, 2) if isinstance(v, float) else v for k, v in trajectory_metrics.items()
+                k: round(v, 2) if isinstance(v, float) else v
+                for k, v in trajectory_metrics.items()
             }
 
             # time trajectory
@@ -328,7 +382,10 @@ def bindcraft(
 
                 # target structure RMSD compared to input PDB
                 trajectory_target_rmsd = unaligned_rmsd(
-                    target_settings["starting_pdb"], trajectory_pdb, target_settings["chains"], "A"
+                    target_settings["starting_pdb"],
+                    trajectory_pdb,
+                    target_settings["chains"],
+                    "A",
                 )
 
                 # save trajectory statistics into CSV
@@ -363,7 +420,9 @@ def bindcraft(
                     trajectory_interface_scores["interface_interface_hbonds"],
                     trajectory_interface_scores["interface_hbond_percentage"],
                     trajectory_interface_scores["interface_delta_unsat_hbonds"],
-                    trajectory_interface_scores["interface_delta_unsat_hbonds_percentage"],
+                    trajectory_interface_scores[
+                        "interface_delta_unsat_hbonds_percentage"
+                    ],
                     trajectory_alpha_interface,
                     trajectory_beta_interface,
                     trajectory_loops_interface,
@@ -394,76 +453,87 @@ def bindcraft(
                         trajectory_interface_residues,
                         advanced_settings,
                     )
+                    existing_mpnn_sequences = set(
+                        pd.read_csv(mpnn_csv, usecols=["Sequence"])["Sequence"].values
+                    )
 
-                    # whether to hard reject sequences with excluded amino acids
-                    if advanced_settings["force_reject_AA"]:
-                        restricted_AAs = set(advanced_settings["omit_AAs"].split(","))
-                        mpnn_sequences = [
-                            {
+                    # create set of MPNN sequences with allowed amino acid composition
+                    restricted_AAs = (
+                        set(
+                            aa.strip().upper()
+                            for aa in advanced_settings["omit_AAs"].split(",")
+                        )
+                        if advanced_settings["force_reject_AA"]
+                        else set()
+                    )
+
+                    mpnn_sequences = sorted(
+                        {
+                            mpnn_trajectories["seq"][n][-length:]: {
                                 "seq": mpnn_trajectories["seq"][n][-length:],
                                 "score": mpnn_trajectories["score"][n],
                                 "seqid": mpnn_trajectories["seqid"][n],
                             }
                             for n in range(advanced_settings["num_seqs"])
-                            if not any(
-                                restricted_AA in mpnn_trajectories["seq"][n]
-                                for restricted_AA in restricted_AAs
+                            if (
+                                not restricted_AAs
+                                or not any(
+                                    aa in mpnn_trajectories["seq"][n][-length:].upper()
+                                    for aa in restricted_AAs
+                                )
                             )
-                        ]
-                    else:
-                        mpnn_sequences = [
-                            {
-                                "seq": mpnn_trajectories["seq"][n][-length:],
-                                "score": mpnn_trajectories["score"][n],
-                                "seqid": mpnn_trajectories["seqid"][n],
-                            }
-                            for n in range(advanced_settings["num_seqs"])
-                        ]
-
-                    # sort MPNN sequences by lowest MPNN score
-                    mpnn_sequences.sort(key=lambda x: x["score"])
-
-                    # add optimisation for increasing recycles if trajectory is beta sheeted
-                    if advanced_settings["optimise_beta"] and float(trajectory_beta) > 15:
-                        advanced_settings["num_recycles_validation"] = advanced_settings[
-                            "optimise_beta_recycles_valid"
-                        ]
-
-                    ### Compile prediction models once for faster prediction of MPNN sequences
-                    clear_mem()
-                    # compile complex prediction model
-                    complex_prediction_model = mk_afdesign_model(
-                        protocol="binder",
-                        num_recycles=advanced_settings["num_recycles_validation"],
-                        data_dir=advanced_settings["af_params_dir"],
-                        use_multimer=multimer_validation,
-                    )
-                    complex_prediction_model.prep_inputs(
-                        pdb_filename=target_settings["starting_pdb"],
-                        chain=target_settings["chains"],
-                        binder_len=length,
-                        rm_target_seq=advanced_settings["rm_template_seq_predict"],
-                        rm_target_sc=advanced_settings["rm_template_sc_predict"],
+                            and mpnn_trajectories["seq"][n][-length:]
+                            not in existing_mpnn_sequences
+                        }.values(),
+                        key=lambda x: x["score"],
                     )
 
-                    # compile binder monomer prediction model
-                    binder_prediction_model = mk_afdesign_model(
-                        protocol="hallucination",
-                        use_templates=False,
-                        initial_guess=False,
-                        use_initial_atom_pos=False,
-                        num_recycles=advanced_settings["num_recycles_validation"],
-                        data_dir=advanced_settings["af_params_dir"],
-                        use_multimer=multimer_validation,
-                    )
-                    binder_prediction_model.prep_inputs(length=length)
+                    del existing_mpnn_sequences
 
-                    # iterate over designed sequences
-                    for mpnn_sequence in mpnn_sequences:
-                        mpnn_time = time.time()
+                    # check whether any sequences are left after amino acid rejection and duplication check, and if yes proceed with prediction
+                    if mpnn_sequences:
+                        # add optimisation for increasing recycles if trajectory is beta sheeted
+                        if (
+                            advanced_settings["optimise_beta"]
+                            and float(trajectory_beta) > 15
+                        ):
+                            advanced_settings["num_recycles_validation"] = (
+                                advanced_settings["optimise_beta_recycles_valid"]
+                            )
 
-                        # compile sequences dictionary with scores and remove duplicate sequences
-                        if mpnn_sequence["seq"] not in [v["seq"] for v in mpnn_dict.values()]:
+                        ### Compile prediction models once for faster prediction of MPNN sequences
+                        clear_mem()
+                        # compile complex prediction model
+                        complex_prediction_model = mk_afdesign_model(
+                            protocol="binder",
+                            num_recycles=advanced_settings["num_recycles_validation"],
+                            data_dir=advanced_settings["af_params_dir"],
+                            use_multimer=multimer_validation,
+                        )
+                        complex_prediction_model.prep_inputs(
+                            pdb_filename=target_settings["starting_pdb"],
+                            chain=target_settings["chains"],
+                            binder_len=length,
+                            rm_target_seq=advanced_settings["rm_template_seq_predict"],
+                            rm_target_sc=advanced_settings["rm_template_sc_predict"],
+                        )
+
+                        # compile binder monomer prediction model
+                        binder_prediction_model = mk_afdesign_model(
+                            protocol="hallucination",
+                            use_templates=False,
+                            initial_guess=False,
+                            use_initial_atom_pos=False,
+                            num_recycles=advanced_settings["num_recycles_validation"],
+                            data_dir=advanced_settings["af_params_dir"],
+                            use_multimer=multimer_validation,
+                        )
+                        binder_prediction_model.prep_inputs(length=length)
+
+                        # iterate over designed sequences
+                        for mpnn_sequence in mpnn_sequences:
+                            mpnn_time = time.time()
+
                             # generate mpnn design name numbering
                             mpnn_design_name = design_name + "_mpnn" + str(mpnn_n)
                             mpnn_score = round(mpnn_sequence["score"], 2)
@@ -478,22 +548,26 @@ def bindcraft(
 
                             # save fasta sequence
                             if advanced_settings["save_mpnn_fasta"] is True:
-                                save_fasta(mpnn_design_name, mpnn_sequence["seq"], design_paths)
+                                save_fasta(
+                                    mpnn_design_name, mpnn_sequence["seq"], design_paths
+                                )
 
                             ### Predict mpnn redesigned binder complex using masked templates
-                            mpnn_complex_statistics, pass_af2_filters = masked_binder_predict(
-                                complex_prediction_model,
-                                mpnn_sequence["seq"],
-                                mpnn_design_name,
-                                target_settings["starting_pdb"],
-                                target_settings["chains"],
-                                length,
-                                trajectory_pdb,
-                                prediction_models,
-                                advanced_settings,
-                                filters,
-                                design_paths,
-                                failure_csv,
+                            mpnn_complex_statistics, pass_af2_filters = (
+                                masked_binder_predict(
+                                    complex_prediction_model,
+                                    mpnn_sequence["seq"],
+                                    mpnn_design_name,
+                                    target_settings["starting_pdb"],
+                                    target_settings["chains"],
+                                    length,
+                                    trajectory_pdb,
+                                    prediction_models,
+                                    advanced_settings,
+                                    filters,
+                                    design_paths,
+                                    failure_csv,
+                                )
                             )
 
                             # if AF2 filters are not passed then skip the scoring
@@ -501,6 +575,7 @@ def bindcraft(
                                 print(
                                     f"Base AF2 filters not passed for {mpnn_design_name}, skipping interface scoring"
                                 )
+                                mpnn_n += 1
                                 continue
 
                             # calculate statistics for each model individually
@@ -516,7 +591,9 @@ def bindcraft(
 
                                 if os.path.exists(mpnn_design_pdb):
                                     # Calculate clashes before and after relaxation
-                                    num_clashes_mpnn = calculate_clash_score(mpnn_design_pdb)
+                                    num_clashes_mpnn = calculate_clash_score(
+                                        mpnn_design_pdb
+                                    )
                                     num_clashes_mpnn_relaxed = calculate_clash_score(
                                         mpnn_design_relaxed
                                     )
@@ -526,7 +603,9 @@ def bindcraft(
                                         mpnn_interface_scores,
                                         mpnn_interface_AA,
                                         mpnn_interface_residues,
-                                    ) = score_interface(mpnn_design_relaxed, binder_chain)
+                                    ) = score_interface(
+                                        mpnn_design_relaxed, binder_chain
+                                    )
 
                                     # secondary structure content of starting trajectory binder
                                     (
@@ -544,15 +623,17 @@ def bindcraft(
 
                                     # unaligned RMSD calculate to determine if binder is in the designed binding site
                                     rmsd_site = unaligned_rmsd(
-                                        trajectory_pdb, mpnn_design_pdb, binder_chain, binder_chain
+                                        trajectory_pdb,
+                                        mpnn_design_pdb,
+                                        binder_chain,
+                                        binder_chain,
                                     )
 
                                     # calculate RMSD of target compared to input PDB
-                                    target_rmsd = unaligned_rmsd(
-                                        target_settings["starting_pdb"],
+                                    target_rmsd = target_pdb_rmsd(
                                         mpnn_design_pdb,
+                                        target_settings["starting_pdb"],
                                         target_settings["chains"],
-                                        "A",
                                     )
 
                                     # add the additional statistics to the mpnn_complex_statistics dictionary
@@ -571,9 +652,13 @@ def bindcraft(
                                             "ShapeComplementarity": mpnn_interface_scores[
                                                 "interface_sc"
                                             ],
-                                            "PackStat": mpnn_interface_scores["interface_packstat"],
+                                            "PackStat": mpnn_interface_scores[
+                                                "interface_packstat"
+                                            ],
                                             "dG": mpnn_interface_scores["interface_dG"],
-                                            "dSASA": mpnn_interface_scores["interface_dSASA"],
+                                            "dSASA": mpnn_interface_scores[
+                                                "interface_dSASA"
+                                            ],
                                             "dG/dSASA": mpnn_interface_scores[
                                                 "interface_dG_SASA_ratio"
                                             ],
@@ -641,7 +726,10 @@ def bindcraft(
 
                                 if os.path.exists(mpnn_binder_pdb):
                                     rmsd_binder = unaligned_rmsd(
-                                        trajectory_pdb, mpnn_binder_pdb, binder_chain, "A"
+                                        trajectory_pdb,
+                                        mpnn_binder_pdb,
+                                        binder_chain,
+                                        "A",
                                     )
 
                                 # append to statistics
@@ -723,7 +811,9 @@ def bindcraft(
                                 mpnn_data.append(mpnn_complex_averages.get(label, None))
                                 for model in model_numbers:
                                     mpnn_data.append(
-                                        mpnn_complex_statistics.get(model, {}).get(label, None)
+                                        mpnn_complex_statistics.get(model, {}).get(
+                                            label, None
+                                        )
                                     )
 
                             # Add the statistical data for binder
@@ -736,7 +826,9 @@ def bindcraft(
                                 mpnn_data.append(binder_averages.get(label, None))
                                 for model in model_numbers:
                                     mpnn_data.append(
-                                        binder_statistics.get(model, {}).get(label, None)
+                                        binder_statistics.get(model, {}).get(
+                                            label, None
+                                        )
                                     )
 
                             # Add the remaining non-statistical data
@@ -755,11 +847,15 @@ def bindcraft(
 
                             # find best model number by pLDDT
                             plddt_values = {
-                                i: mpnn_data[i] for i in range(11, 15) if mpnn_data[i] is not None
+                                i: mpnn_data[i]
+                                for i in range(11, 15)
+                                if mpnn_data[i] is not None
                             }
 
                             # Find the key with the highest value
-                            highest_plddt_key = int(max(plddt_values, key=plddt_values.get))
+                            highest_plddt_key = int(
+                                max(plddt_values, key=plddt_values.get)
+                            )
 
                             # Output the number part of the key
                             best_model_number = highest_plddt_key - 10
@@ -769,7 +865,9 @@ def bindcraft(
                             )
 
                             # run design data against filter thresholds
-                            filter_conditions = check_filters(mpnn_data, design_labels, filters)
+                            filter_conditions = check_filters(
+                                mpnn_data, design_labels, filters
+                            )
                             if filter_conditions == True:
                                 print(mpnn_design_name + " passed all filters")
                                 accepted_mpnn += 1
@@ -783,20 +881,24 @@ def bindcraft(
                                 insert_data(final_csv, final_data)
 
                                 # copy animation from accepted trajectory
-                                accepted_animation = os.path.join(
-                                    design_paths["Accepted/Animation"], f"{design_name}.html"
-                                )
-                                if not os.path.exists(accepted_animation):
-                                    shutil.copy(
-                                        os.path.join(
-                                            design_paths["Trajectory/Animation"],
-                                            f"{design_name}.html",
-                                        ),
-                                        accepted_animation,
+                                if advanced_settings["save_design_animations"]:
+                                    accepted_animation = os.path.join(
+                                        design_paths["Accepted/Animation"],
+                                        f"{design_name}.html",
                                     )
+                                    if not os.path.exists(accepted_animation):
+                                        shutil.copy(
+                                            os.path.join(
+                                                design_paths["Trajectory/Animation"],
+                                                f"{design_name}.html",
+                                            ),
+                                            accepted_animation,
+                                        )
 
                                 # copy plots of accepted trajectory
-                                plot_files = os.listdir(design_paths["Trajectory/Plots"])
+                                plot_files = os.listdir(
+                                    design_paths["Trajectory/Plots"]
+                                )
                                 plots_to_copy = [
                                     f
                                     for f in plot_files
@@ -815,7 +917,14 @@ def bindcraft(
                             else:
                                 print(f"Unmet filter conditions for {mpnn_design_name}")
                                 failure_df = pd.read_csv(failure_csv)
-                                special_prefixes = ("Average_", "1_", "2_", "3_", "4_", "5_")
+                                special_prefixes = (
+                                    "Average_",
+                                    "1_",
+                                    "2_",
+                                    "3_",
+                                    "4_",
+                                    "5_",
+                                )
                                 incremented_columns = set()
 
                                 for column in filter_conditions:
@@ -825,7 +934,9 @@ def bindcraft(
                                             base_column = column.split("_", 1)[1]
 
                                     if base_column not in incremented_columns:
-                                        failure_df[base_column] = failure_df[base_column] + 1
+                                        failure_df[base_column] = (
+                                            failure_df[base_column] + 1
+                                        )
                                         incremented_columns.add(base_column)
 
                                 failure_df.to_csv(failure_csv, index=False)
@@ -837,14 +948,20 @@ def bindcraft(
                             # if enough mpnn sequences of the same trajectory pass filters then stop
                             if accepted_mpnn >= advanced_settings["max_mpnn_sequences"]:
                                 break
-                        else:
-                            print("Skipping duplicate sequence")
 
-                    if accepted_mpnn >= 1:
-                        print("Found " + str(accepted_mpnn) + " MPNN designs passing filters")
+                        if accepted_mpnn >= 1:
+                            print(
+                                "Found "
+                                + str(accepted_mpnn)
+                                + " MPNN designs passing filters"
+                            )
+                        else:
+                            print("No accepted MPNN designs found for this trajectory.")
+
                     else:
-                        print("No accepted MPNN designs found for this trajectory.")
-                        rejected_designs += 1
+                        print(
+                            "Duplicate MPNN designs sampled with different trajectory, skipping current trajectory optimisation"
+                        )
 
                     # save space by removing unrelaxed design trajectory PDB
                     if advanced_settings["remove_unrelaxed_trajectory"]:
@@ -887,7 +1004,9 @@ def bindcraft(
     )
 
     # Consolidate & Rank Designs
-    accepted_binders = [f for f in os.listdir(design_paths["Accepted"]) if f.endswith(".pdb")]
+    accepted_binders = [
+        f for f in os.listdir(design_paths["Accepted"]) if f.endswith(".pdb")
+    ]
 
     for f in os.listdir(design_paths["Accepted/Ranked"]):
         os.remove(os.path.join(design_paths["Accepted/Ranked"], f))
@@ -906,8 +1025,13 @@ def bindcraft(
             target_settings["binder_name"], model = binder.rsplit("_model", 1)
             if target_settings["binder_name"] == row["Design"]:
                 # rank and copy into ranked folder
-                row_data = {"Rank": rank, **{label: row[label] for label in design_labels}}
-                final_df = pd.concat([final_df, pd.DataFrame([row_data])], ignore_index=True)
+                row_data = {
+                    "Rank": rank,
+                    **{label: row[label] for label in design_labels},
+                }
+                final_df = pd.concat(
+                    [final_df, pd.DataFrame([row_data])], ignore_index=True
+                )
                 old_path = os.path.join(design_paths["Accepted"], binder)
                 new_path = os.path.join(
                     design_paths["Accepted/Ranked"],
@@ -935,7 +1059,7 @@ def main(
     target_hotspot_residues: str = "",
     lengths: str = "40,100",
     number_of_final_designs: int = 1,
-    binder_name:str = None,
+    binder_name: str = None,
     out_dir: str = "./out/bindcraft",
 ):
     """
@@ -961,7 +1085,9 @@ def main(
     )
 
     for out_file, out_content in outputs:
-        (Path(out_dir) / today / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
+        (Path(out_dir) / today / Path(out_file)).parent.mkdir(
+            parents=True, exist_ok=True
+        )
         if out_content:
             with open((Path(out_dir) / today / Path(out_file)), "wb") as out:
                 out.write(out_content)
