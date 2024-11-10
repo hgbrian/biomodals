@@ -8,12 +8,7 @@ import json
 from pathlib import Path
 from typing import Union
 
-from modal import App, Image, Mount
-
-FORCE_BUILD = False
-LOCAL_IN = "./in/pdb2png"
-LOCAL_OUT = "./out/pdb2png"
-REMOTE_IN = "/in"
+from modal import App, Image
 
 app = App()
 
@@ -24,7 +19,6 @@ image = (
     .apt_install("g++")
     .pip_install(["ProDy==2.4.1"])
 )
-
 
 
 RENDER_OPTIONS = {
@@ -63,7 +57,7 @@ RENDER_OPTIONS = {
         "ray_trace_mode": "1",
         "ray_trace_color": "black",
     },
-    "muted": {
+    "flat": {
         "bg_color": "white",
         "valence": "0",
         "bg_rgb": "white",
@@ -154,18 +148,18 @@ def get_orientation_for_ligand(
     image=image,
     gpu=None,
     timeout=60 * 15,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
 def pdb2png(
-    pdb_file: str,
-    protein_rotate: Union[tuple[float, float, float], None] = None,
-    protein_color: Union[tuple[float, float, float], str, None] = None,
-    protein_zoom: Union[float, None] = None,
-    hetatm_color: Union[tuple[float, float, float], str, None] = None,
-    ligand_id: Union[str, None] = None,
-    ligand_chain: Union[str, None] = None,
+    pdb_name: str,
+    pdb_str: str,
+    protein_rotates: list[tuple[float, float, float]] = None,
+    protein_color: tuple[float, float, float] = None,
+    protein_zoom: float = None,
+    hetatm_color: tuple[float, float, float] = None,
+    ligand_id: str = None,
+    ligand_chain: str = None,
     ligand_zoom: float = None,
-    ligand_color: Union[tuple[float, float, float], str] = "red",
+    ligand_color: str = "red",
     show_water: bool = False,
     render_style: str = "default",
     width: int = 1600,
@@ -177,123 +171,174 @@ def pdb2png(
     """
     from pymol import cmd
 
-    in_pdb_file = Path(REMOTE_IN) / Path(pdb_file).relative_to(LOCAL_IN)
+    in_dir = "/tmp/in_pp"
+    out_dir = "/tmp/out_pp"
+    Path(in_dir).mkdir(parents=True, exist_ok=True)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
 
-    # reinitialize is important if you call the function multiple times!
-    cmd.reinitialize()
+    in_pdb_file = Path(in_dir) / pdb_name
+    open(in_pdb_file, "w").write(pdb_str)
 
-    cmd.load(in_pdb_file)
-    cmd.orient()  # maybe not needed
-
-    #
+    # --------------------------------------------------------------------------
     # Rotation
     #
-    if protein_rotate is not None:
-        cmd.rotate("x", protein_rotate[0])
-        cmd.rotate("y", protein_rotate[1])
-        cmd.rotate("z", protein_rotate[2])
-    elif ligand_id is not None or ligand_chain is not None:
-        ligand_id_or_chain = (
-            (ligand_id, ligand_chain) if ligand_id and ligand_chain else (ligand_id or ligand_chain)
-        )
-        _axis, _angle = get_orientation_for_ligand(str(in_pdb_file), ligand_id_or_chain)
-        cmd.rotate(_axis, _angle)
+    png_num = None
+    png_num_str = ""
 
-    #
-    # Colors
-    #
-    if protein_color is None:
-        protein_color = DEFAULT_PROTEIN_COLORS
+    for protein_rotate in protein_rotates or [None]:
+        cmd.reinitialize() # move here
+        cmd.load(in_pdb_file)
 
-    if isinstance(protein_color, tuple):
-        n = 0
-        for chain in cmd.get_chains():
-            cmd.set_color("protein_color", protein_color[n : n + 3])
-            cmd.color("protein_color", f"chain {chain} and not hetatm")
-            n = (n + 3) % len(protein_color)
-    else:
-        # color is a string like "red"
-        cmd.color(protein_color, "not hetatm")
+        if protein_rotate is not None:
+            cmd.rotate("x", protein_rotate[0])
+            cmd.rotate("y", protein_rotate[1])
+            cmd.rotate("z", protein_rotate[2])
+            png_num = png_num + 1 if png_num is not None else 0
+            png_num_str = f"_{png_num:04d}"
 
-    # Color proteins and hetatms
-    for hp_id, hp_color, hp_sel in [
-        ("protein", protein_color, "not hetatm"),
-        ("hetatm", hetatm_color, "hetatm"),
-    ]:
-        if hp_color is not None:
-            if isinstance(hp_color, tuple):
-                n = 0
-                for chain in cmd.get_chains():
-                    cmd.select(f"sel_{hp_id}_{chain}", f"chain {chain} and {hp_sel}")
-                    if cmd.count_atoms(f"sel_{hp_id}_{chain}") > 0:
-                        cmd.set_color(f"{hp_id}_color_{chain}", hp_color[n : n + 3])
-                        cmd.color(f"{hp_id}_color_{chain}", f"sel_{hp_id}_{chain}")
-                        n = (n + 3) % len(hp_color)
-            else:
-                cmd.color(hp_color, hp_sel)
+        elif ligand_id is not None or ligand_chain is not None:
+            ligand_id_or_chain = (
+                (ligand_id, ligand_chain)
+                if ligand_id and ligand_chain
+                else (ligand_id or ligand_chain)
+            )
+            _axis, _angle = get_orientation_for_ligand(str(in_pdb_file), ligand_id_or_chain)
+            cmd.rotate(_axis, _angle)
 
-    if protein_zoom is not None:
-        cmd.zoom("all", protein_zoom)
-
-    if ligand_id is not None:
-        and_chain = f"and chain {ligand_chain}" if ligand_chain else ""
-        cmd.select("ligand", f"resn {ligand_id} {and_chain}")
-
-        if ligand_zoom is not None:
-            cmd.zoom("ligand", ligand_zoom)
-
-        if ligand_color is None:
-            ligand_color = DEFAULT_HETATM_COLORS
-
-        if isinstance(ligand_color, tuple):
-            cmd.set_color("ligand_color", ligand_color)
-            cmd.color("ligand_color", "ligand")
         else:
-            cmd.color(ligand_color, "ligand")
+            cmd.orient()
 
-    if not show_water:
-        cmd.select("HOH", "resn HOH")
-        cmd.hide("everything", "HOH")
+        # --------------------------------------------------------------------------
+        # Colors
+        #
+        if protein_color is None:
+            protein_color = DEFAULT_PROTEIN_COLORS
 
-    #
-    # Render
-    #
-    apply_render_style(render_style)
+        if isinstance(protein_color, tuple):
+            n = 0
+            for chain in cmd.get_chains():
+                cmd.set_color("protein_color", protein_color[n : n + 3])
+                cmd.color("protein_color", f"chain {chain} and not hetatm")
+                n = (n + 3) % len(protein_color)
+        else:
+            # color is a string like "red"
+            cmd.color(protein_color, "not hetatm")
 
-    cmd.ray(width, height)
+        # Color proteins and hetatms
+        for hp_id, hp_color, hp_sel in [
+            ("protein", protein_color, "not hetatm"),
+            ("hetatm", hetatm_color, "hetatm"),
+        ]:
+            if hp_color is not None:
+                if isinstance(hp_color, tuple):
+                    n = 0
+                    for chain in cmd.get_chains():
+                        cmd.select(f"sel_{hp_id}_{chain}", f"chain {chain} and {hp_sel}")
+                        if cmd.count_atoms(f"sel_{hp_id}_{chain}") > 0:
+                            cmd.set_color(f"{hp_id}_color_{chain}", hp_color[n : n + 3])
+                            cmd.color(f"{hp_id}_color_{chain}", f"sel_{hp_id}_{chain}")
+                            n = (n + 3) % len(hp_color)
+                else:
+                    cmd.color(hp_color, hp_sel)
 
-    out_png_path = Path(LOCAL_OUT) / Path(pdb_file).relative_to(LOCAL_IN).with_suffix(".png")
-    out_png_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd.save(out_png_path, in_pdb_file)
-    return [(out_png_path, open(out_png_path, "rb").read())]
+        if protein_zoom is not None:
+            cmd.zoom("all", protein_zoom)
+
+        # --------------------------------------------------------------------------
+        # Ligand
+        #
+        if ligand_id is not None:
+            and_chain = f"and chain {ligand_chain}" if ligand_chain else ""
+            cmd.select("ligand", f"resn {ligand_id} {and_chain}")
+
+            if ligand_zoom is not None:
+                cmd.zoom("ligand", ligand_zoom)
+
+            if ligand_color is None:
+                ligand_color = DEFAULT_HETATM_COLORS
+
+            if isinstance(ligand_color, tuple):
+                cmd.set_color("ligand_color", ligand_color)
+                cmd.color("ligand_color", "ligand")
+            else:
+                cmd.color(ligand_color, "ligand")
+
+        if not show_water:
+            cmd.select("HOH", "resn HOH")
+            cmd.hide("everything", "HOH")
+
+        # --------------------------------------------------------------------------
+        # Render and save
+        #
+        apply_render_style(render_style)
+        cmd.ray(width, height)
+
+        out_png_path = Path(out_dir) / f"{Path(pdb_name).with_suffix('')}{png_num_str}.png"
+        out_png_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd.save(out_png_path, in_pdb_file)
+
+    return [
+        (out_file.relative_to(out_dir), open(out_file, "rb").read())
+        for out_file in Path(out_dir).glob("**/*")
+        if Path(out_file).is_file()
+    ]
+
+
+def _parse_rotation_range(rotate_str):
+    """convert arg string to list of tuples for animation
+    e.g., "100-200,0,0,10" -> [(100,0,0), (110,0,0), ...]
+    """
+    *ranges, num_steps = rotate_str.split(",")
+    steps = int(num_steps)
+
+    # if there is no range given, then just double up the number
+    start_end = [
+        (float(r), float(r)) if "-" not in r else (float(r.split("-")[0]), float(r.split("-")[1]))
+        for r in ranges
+    ]
+
+    steps_sizes = [(end - start) / steps for start, end in start_end]
+
+    return [
+        tuple(start + (step * i) for (start, _), step in zip(start_end, steps_sizes))
+        for i in range(steps)
+    ]
 
 
 @app.local_entrypoint()
 def main(
     input_pdb,
-    protein_rotate=None,
-    protein_color=None,
-    protein_zoom=None,
-    hetatm_color=None,
-    ligand_id=None,
-    ligand_chain=None,
-    ligand_zoom=None,
-    ligand_color="red",
-    show_water=False,
-    render_style="default",
-    width=1600,
-    height=1600,
-) -> list:
-    if isinstance(protein_rotate, str):
-        protein_rotate = tuple(map(float, protein_color.split(",")))
-    if isinstance(protein_color, str) and "," in protein_color:
+    protein_rotate: str = None,
+    protein_color: str = None,
+    protein_zoom: float = None,
+    hetatm_color: str = None,
+    ligand_id: str = None,
+    ligand_chain: str = None,
+    ligand_zoom: float = None,
+    ligand_color: str = "red",
+    show_water: bool = False,
+    render_style: str = "default",
+    width: int = 1600,
+    height: int = 1600,
+    out_dir: str = ".",
+):
+    if protein_rotate is not None and "-" in protein_rotate:
+        protein_rotates = _parse_rotation_range(protein_rotate)
+    elif protein_rotate is not None:
+        protein_rotates = [tuple(map(float, protein_rotate.split(",")))][:3]
+
+    if protein_color is not None and "," in protein_color:
         protein_color = tuple(map(float, protein_color.split(",")))
-    if isinstance(ligand_color, str) and "," in ligand_color:
+
+    if ligand_color is not None and "," in ligand_color:
         ligand_color = tuple(map(float, ligand_color.split(",")))
 
+    pdb_str = open(input_pdb).read()
+
     outputs = pdb2png.remote(
-        input_pdb,
-        protein_rotate,
+        Path(input_pdb).name,
+        pdb_str,
+        protein_rotates,
         protein_color,
         protein_zoom,
         hetatm_color,
@@ -308,7 +353,7 @@ def main(
     )
 
     for out_file, out_content in outputs:
-        Path(out_file).parent.mkdir(parents=True, exist_ok=True)
+        (Path(out_dir) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open(out_file, "wb") as out:
+            with open((Path(out_dir) / Path(out_file)), "wb") as out:
                 out.write(out_content)
