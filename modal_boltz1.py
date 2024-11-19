@@ -136,7 +136,7 @@ def _fix_fasta(input_faa: str, msa_dir) -> str:
         else:
             # proteins can have explicit |PROTEIN| or just an id
             # colabfold_batch escapes some characters
-            seq_id_esc = re.sub(r"[|_/]", "_", seq_id)
+            seq_id_esc = re.sub(r"[|_/ ,\[\]\(\)]", "_", seq_id)
 
             assert all(aa.upper() in ALLOWED_AAS for aa in seq), f"not AAs: {seq}"
             fixed_fasta += f">{chains[n]}|PROTEIN|{msa_dir}/{seq_id_esc}.a3m\n{seq}\n"
