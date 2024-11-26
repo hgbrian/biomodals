@@ -1,11 +1,10 @@
 """
 Boltz-1 https://github.com/jwohlwend/boltz
 
-Because I have to add an msa path to the fasta header,
-there is some awkwardness to the preprocessing.
-I assume protein when it's not explicitly otherwise.
+TODO: adding a custom msa dir is not really supported
+The user has to get the msa_dir onto modal so it requires a few more steps.
 
-I have tested a bit but if it fails it's probably due to this.
+TODO: use yaml instead of fasta, and convert input fasta to yaml
 
 ## Example input:
 ```
@@ -20,6 +19,11 @@ N[C@@H](Cc1ccc(O)cc1)C(=O)O
 >asdf
 MAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQK
 ```
+Then run
+```
+modal run modal_boltz1.py --input-faa test_boltz1.faa
+```
+
 """
 
 import os
@@ -28,51 +32,34 @@ from pathlib import Path
 from modal import App, Image
 
 GPU = os.environ.get("GPU", "A100")
+TIMEOUT = int(os.environ.get("TIMEOUT", 60))
 
 CACHE_DIR = "/root/.boltz"
 ENTITY_TYPES = {"protein", "dna", "rna", "ccd", "smiles"}
 ALLOWED_AAS = "ACDEFGHIKLMNPQRSTVWY"
 
 
-def _get_msa(in_faa: str, msa_dir: str):
-    """Use colabfold_batch (a shared server)
-    to get an MSA for the proteins in this fasta.
-    Note the .a3m filename is derived from the fasta header,
-    with some characters escaped.
-    """
-    from subprocess import run
-
-    # separate out the proteins
-    proteins = [
-        f">{s_id}\n{seq}\n"
-        for s_id, seq in fasta_iter(in_faa)
-        if all(aa in ALLOWED_AAS for aa in seq.upper())
-    ]
-    open("/tmp/msa.fasta", "w").write("".join(proteins))
-
-    run(f"colabfold_batch /tmp/msa.fasta {msa_dir} --msa-only", shell=True, check=True)
-
-    return msa_dir
-
-
 def download_model():
     """Force download of the Boltz-1 model by running it once"""
     from subprocess import run
 
-    in_dir = "/tmp/tmp_in_boltz"
-    Path(in_dir).mkdir(parents=True, exist_ok=True)
-    msa_dir = "/tmp/tmp_msa_boltz"
-    in_faa = "/tmp/tmp.fasta"
-    open(in_faa, "w").write(">tmp\nMAWTPLLLLLLSHCTGSLSQPVLTQAPTSLSASS\n")
+    Path(in_dir := "/tmp/tmp_in_boltz").mkdir(parents=True, exist_ok=True)
+    open(in_faa := "/tmp/tmp.fasta", "w").write(">tmp\nMAWTPLLLLLLSHCTGSLSQPVLT\n")
 
-    _get_msa("/tmp/tmp.fasta", "/tmp/tmp_msa_boltz")
-    fixed_faa_str = _fix_fasta(in_faa, msa_dir)
-    fixed_faa = Path(in_dir) / "fixed.fasta"
-    open(fixed_faa, "w").write(fixed_faa_str)
+    fixed_faa_str = _prepare_fasta(in_faa)
+    open(fixed_faa := Path(in_dir) / "fixed.fasta", "w").write(fixed_faa_str)
 
     run(
-        f"boltz predict {fixed_faa} --out_dir /tmp --cache {CACHE_DIR}",
-        shell=True,
+        [
+            "boltz",
+            "predict",
+            fixed_faa,
+            "--out_dir",
+            "/tmp",
+            "--cache",
+            CACHE_DIR,
+            "--use_msa_server",
+        ],
         check=True,
     )
 
@@ -93,7 +80,7 @@ image = (
     )
     .run_commands("python -m colabfold.download")
     .apt_install("build-essential")
-    .pip_install("boltz==0.1.0")
+    .pip_install("boltz")
     .run_function(download_model, gpu="a10g")
 )
 
@@ -112,7 +99,7 @@ def fasta_iter(fasta_name):
             yield header, seq
 
 
-def _fix_fasta(input_faa: str, msa_dir) -> str:
+def _prepare_fasta(input_faa: str) -> str:
     """Basically, add the path for the a3m msa file to the fasta header.
     This is a bit complicated and there is probably a better way!
     For random ids, assume PROTEIN.
@@ -136,38 +123,39 @@ def _fix_fasta(input_faa: str, msa_dir) -> str:
         else:
             # proteins can have explicit |PROTEIN| or just an id
             # colabfold_batch escapes some characters
-            seq_id_esc = re.sub(r"[|_/ ,\[\]\(\)]", "_", seq_id)
-
             assert all(aa.upper() in ALLOWED_AAS for aa in seq), f"not AAs: {seq}"
-            fixed_fasta += f">{chains[n]}|PROTEIN|{msa_dir}/{seq_id_esc}.a3m\n{seq}\n"
+            fixed_fasta += f">{chains[n]}|PROTEIN|\n{seq.upper()}\n"
 
     return fixed_fasta
 
 
-@app.function(timeout=60 * 60, gpu=GPU)
+@app.function(timeout=TIMEOUT * 60, gpu=GPU)
 def boltz(input_faa_str: str, input_faa_name: str = "input.faa"):
     """Runs Boltz on a fasta.
     Fasta can contain protein, DNA, RNA, smiles, ccd
     """
     from subprocess import run
 
-    in_dir = "/tmp/in_boltz"
-    out_dir = "/tmp/out_boltz"
-    msa_dir = "/tmp/msa_boltz"
-    Path(in_dir).mkdir(parents=True, exist_ok=True)
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    Path(in_dir := "/tmp/in_boltz").mkdir(parents=True, exist_ok=True)
+    Path(out_dir := "/tmp/out_boltz").mkdir(parents=True, exist_ok=True)
 
     in_faa = Path(in_dir) / input_faa_name
     open(in_faa, "w").write(input_faa_str)
 
-    _get_msa(in_faa, msa_dir)
-    fixed_faa_str = _fix_fasta(in_faa, msa_dir)
-    fixed_faa = Path(in_dir) / "fixed.fasta"
-    open(fixed_faa, "w").write(fixed_faa_str)
+    fixed_faa_str = _prepare_fasta(in_faa)
+    open(fixed_faa := Path(in_dir) / "fixed.fasta", "w").write(fixed_faa_str)
 
     run(
-        f"boltz predict {fixed_faa} --out_dir {out_dir} --cache {CACHE_DIR}",
-        shell=True,
+        [
+            "boltz",
+            "predict",
+            fixed_faa,
+            "--out_dir",
+            out_dir,
+            "--cache",
+            CACHE_DIR,
+            "--use_msa_server",
+        ],
         check=True,
     )
 
