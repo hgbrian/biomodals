@@ -8,7 +8,7 @@ MAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQQG
 CN1C=NC2=C1C(=O)N(C)C(=O)N2C
 ```
 ```
-modal run modal_chai.py --input-faa test_chai.faa
+modal run modal_chai1.py --input-faa test_chai1.faa
 ```
 """
 
@@ -22,7 +22,7 @@ TIMEOUT = int(os.environ.get("TIMEOUT", 30))
 
 
 def download_models():
-    """Runs Chai on a fasta file and returns the outputs"""
+    """Runs Chai-1 on a fasta file and returns the outputs"""
     import torch
     from chai_lab.chai1 import run_inference
 
@@ -51,25 +51,25 @@ image = (
     .run_function(download_models, gpu="a100")
 )
 
-app = App("chai", image=image)
+app = App("chai1", image=image)
 
 
 @app.function(timeout=TIMEOUT * 60, gpu=GPU)
-def chai(
+def chai1(
     input_faa_str: str,
     input_faa_name: str = "input.faa",
     num_trunk_recycles: int = 3,
     num_diffn_timesteps: int = 200,
     seed: int = 42,
     use_esm_embeddings: bool = True,
-    chai_kwargs:dict = {},
+    chai1_kwargs:dict = {},
 ) -> list:
-    """Runs Chai on a fasta file and returns the outputs"""
+    """Runs Chai1 on a fasta file and returns the outputs"""
     import torch
     from chai_lab.chai1 import run_inference
 
-    Path(in_dir := "/tmp/in_chai").mkdir(parents=True, exist_ok=True)
-    Path(out_dir := "/tmp/out_chai").mkdir(parents=True, exist_ok=True)
+    Path(in_dir := "/tmp/in_chai1").mkdir(parents=True, exist_ok=True)
+    Path(out_dir := "/tmp/out_chai1").mkdir(parents=True, exist_ok=True)
 
     fasta_path = Path(in_dir) / input_faa_name
     fasta_path.write_text(input_faa_str)
@@ -82,7 +82,7 @@ def chai(
         seed=seed,
         device=torch.device("cuda:0"),
         use_esm_embeddings=use_esm_embeddings,
-        **chai_kwargs,
+        **chai1_kwargs,
     )
 
     return [
@@ -95,18 +95,18 @@ def chai(
 @app.local_entrypoint()
 def main(
     input_faa: str,
-    out_dir: str = "./out/chai",
+    out_dir: str = "./out/chai1",
     run_name: str = None,
-    chai_kwargs: str = None,
+    chai1_kwargs: str = None,
 ):
     from datetime import datetime
 
     input_faa_str = open(input_faa).read()
 
-    outputs = chai.remote(
+    outputs = chai1.remote(
         input_faa_str,
         input_faa_name=Path(input_faa).name,
-        chai_kwargs=dict(eval(chai_kwargs)) if chai_kwargs else {},
+        chai1_kwargs=dict(eval(chai1_kwargs)) if chai1_kwargs else {},
     )
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
