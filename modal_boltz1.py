@@ -21,7 +21,7 @@ MAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQK
 ```
 Then run
 ```
-modal run modal_boltz1.py --input-faa test_boltz1.faa
+modal run modal_boltz.py --input-faa test_boltz.faa
 ```
 
 """
@@ -85,7 +85,7 @@ image = (
     .run_function(download_model, gpu="a10g")
 )
 
-app = App("boltz1", image=image)
+app = App("boltz", image=image)
 
 
 def fasta_iter(fasta_name):
@@ -170,7 +170,7 @@ def boltz(input_faa_str: str, input_faa_name: str = "input.faa"):
 @app.local_entrypoint()
 def main(
     input_faa: str,
-    out_dir: str = "./out/boltz1",
+    out_dir: str = "./out/boltz",
     run_name: str = None,
 ):
     from datetime import datetime
