@@ -29,9 +29,10 @@ modal run modal_boltz1.py --input-faa test_boltz1.faa
 import os
 from pathlib import Path
 
+import modal
 from modal import App, Image
 
-GPU = os.environ.get("GPU", "A100")
+GPU = os.environ.get("GPU", modal.gpu.A100(size="80GB"))
 TIMEOUT = int(os.environ.get("TIMEOUT", 60))
 
 CACHE_DIR = "/root/.boltz"
@@ -170,6 +171,7 @@ def boltz(input_faa_str: str, input_faa_name: str = "input.faa"):
 def main(
     input_faa: str,
     out_dir: str = "./out/boltz1",
+    run_name: str = None,
 ):
     from datetime import datetime
 
@@ -181,7 +183,7 @@ def main(
     )
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
-    out_dir_full = Path(out_dir) / today
+    out_dir_full = Path(out_dir) / (run_name or today)
 
     for out_file, out_content in outputs:
         (Path(out_dir_full) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
