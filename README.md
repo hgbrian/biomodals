@@ -102,8 +102,15 @@ modal run modal_nextflow_example.py
 # Boltz-1
 [Boltz-1](https://github.com/jwohlwend/boltz), an open source AlphaFold 3-like model.
 ```
-echo ">A_PROTEIN_INSULIN\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS\n>B|RNA|\nACUGACUGGAAGUCCCCCGUAGUACCCGACG\n>C|smiles\nN[C@@H](Cc1ccc(O)cc1)C(=O)O" > insulin_rna.faa
-modal run modal_boltz1.py --input-faa insulin_dna.faa
+echo ">A_PROTEIN_INSULIN\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS\n>B|RNA|\nACUGACUGGAAGUCCCCCGUAGUACCCGACG\n>C|smiles\nN[C@@H](Cc1ccc(O)cc1)C(=O)O" > test_boltz.faa
+modal run modal_boltz.py --input-faa test_boltz.faa
+```
+
+# Chai-1
+[Chai-1](https://github.com/chaidiscovery/chai-lab), another open source AlphaFold 3-like model.
+```
+echo ">protein|name=insulin\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS\n>RNA|name=rna\nACUGACUGGAAGUCCCCCGUAGUACCCGACG\n>ligand|name=caffeine\nN[C@@H](Cc1ccc(O)cc1)C(=O)O" > test_chai1.faa
+modal run modal_chai1.py --input-faa test_chai1.faa
 ```
 
 ## Other modal repos
