@@ -96,7 +96,8 @@ def chai(
 def main(
     input_faa: str,
     out_dir: str = "./out/chai",
-    chai_kwargs: str|None = None,
+    run_name: str = None,
+    chai_kwargs: str = None,
 ):
     from datetime import datetime
 
@@ -109,7 +110,7 @@ def main(
     )
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
-    out_dir_full = Path(out_dir) / today
+    out_dir_full = Path(out_dir) / (run_name or today)
 
     for out_file, out_content in outputs:
         (Path(out_dir_full) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
