@@ -16,12 +16,10 @@ STS
 ACTGACTGGAAGATTTTTTTTTTTCCCCCGTAGTTTTTACCCGACG
 >C|smiles
 N[C@@H](Cc1ccc(O)cc1)C(=O)O
->asdf
-MAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQK
 ```
 Then run
 ```
-modal run modal_boltz.py --input-faa test_boltz.faa
+modal run modal_boltz.py --input-faa test_boltz.fasta
 ```
 
 """
@@ -45,16 +43,13 @@ def download_model():
     from subprocess import run
 
     Path(in_dir := "/tmp/tmp_in_boltz").mkdir(parents=True, exist_ok=True)
-    open(in_faa := "/tmp/tmp.fasta", "w").write(">tmp\nMAWTPLLLLLLSHCTGSLSQPVLT\n")
-
-    fixed_faa_str = _prepare_fasta(in_faa)
-    open(fixed_faa := Path(in_dir) / "fixed.fasta", "w").write(fixed_faa_str)
+    open(in_faa := Path(in_dir) / "tmp.fasta", "w").write(">A|PROTEIN|\nMAWTPLLLLLLSH\n")
 
     run(
         [
             "boltz",
             "predict",
-            fixed_faa,
+            str(in_faa),
             "--out_dir",
             "/tmp",
             "--cache",
@@ -100,38 +95,8 @@ def fasta_iter(fasta_name):
             yield header, seq
 
 
-def _prepare_fasta(input_faa: str) -> str:
-    """Basically, add the path for the a3m msa file to the fasta header.
-    This is a bit complicated and there is probably a better way!
-    For random ids, assume PROTEIN.
-    """
-    import re
-
-    chains = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-    fixed_fasta = ""
-
-    rx = re.compile(r"^([A-Z])\|(\S+)\|?(.*)$")
-
-    for n, (seq_id, seq) in enumerate(fasta_iter(input_faa)):
-        if n >= len(chains):
-            raise ValueError(">26 chains not allowed")
-
-        s_info = rx.search(seq_id)
-
-        if s_info and s_info.groups()[1].lower() != "protein":
-            fixed_fasta += f">{seq_id}\n{seq}\n"
-        else:
-            # proteins can have explicit |PROTEIN| or just an id
-            # colabfold_batch escapes some characters
-            assert all(aa.upper() in ALLOWED_AAS for aa in seq), f"not AAs: {seq}"
-            fixed_fasta += f">{chains[n]}|PROTEIN|\n{seq.upper()}\n"
-
-    return fixed_fasta
-
-
 @app.function(timeout=TIMEOUT * 60, gpu=GPU)
-def boltz(input_faa_str: str, input_faa_name: str = "input.faa"):
+def boltz(input_faa_str: str, input_faa_name: str = "input.fasta"):
     """Runs Boltz on a fasta.
     Fasta can contain protein, DNA, RNA, smiles, ccd
     """
@@ -141,18 +106,17 @@ def boltz(input_faa_str: str, input_faa_name: str = "input.faa"):
     Path(out_dir := "/tmp/out_boltz").mkdir(parents=True, exist_ok=True)
 
     in_faa = Path(in_dir) / input_faa_name
+    if in_faa.suffix == ".faa":
+        in_faa = in_faa.with_suffix(".fasta")
     open(in_faa, "w").write(input_faa_str)
-
-    fixed_faa_str = _prepare_fasta(in_faa)
-    open(fixed_faa := Path(in_dir) / "fixed.fasta", "w").write(fixed_faa_str)
 
     run(
         [
             "boltz",
             "predict",
-            fixed_faa,
+            str(in_faa),
             "--out_dir",
-            out_dir,
+            str(out_dir),
             "--cache",
             CACHE_DIR,
             "--use_msa_server",
