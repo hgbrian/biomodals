@@ -10,7 +10,7 @@ from typing import Union
 
 from modal import App, Image
 
-app = App()
+app = App("pdb2png")
 
 image = (
     Image.micromamba(python_version="3.11")
@@ -326,6 +326,8 @@ def main(
         protein_rotates = _parse_rotation_range(protein_rotate)
     elif protein_rotate is not None:
         protein_rotates = [tuple(map(float, protein_rotate.split(",")))][:3]
+    else:
+        protein_rotates = None
 
     if protein_color is not None and "," in protein_color:
         protein_color = tuple(map(float, protein_color.split(",")))
