@@ -76,7 +76,18 @@ RENDER_OPTIONS = {
         "direct": "0.2",
         "ray_trace_mode": "0",
     },
+    "cartoon": {
+        "cartoon_oval_length": "1.5",
+        "cartoon_oval_width": "0.5",
+        "cartoon_rect_length": "1.5",
+        "cartoon_rect_width": "0.5",
+        "cartoon_loop_radius": "0.3",
+        "ray_trace_mode": "1",
+        "ray_trace_color": "black",
+        "opaque_background": "off",
+    },
 }
+
 
 # in groups of three
 DEFAULT_PROTEIN_COLORS = (0.8, 0.8, 0.6, 0.8, 0.6, 0.8, 0.6, 0.8, 0.8)
