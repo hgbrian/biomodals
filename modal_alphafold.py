@@ -20,8 +20,12 @@ image = (
     Image.debian_slim(python_version="3.11")
     .micromamba()
     .apt_install("wget", "git")
-    .pip_install("colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold")
-    .micromamba_install("kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"])
+    .pip_install(
+        "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold"
+    )
+    .micromamba_install(
+        "kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"]
+    )
     .run_commands(
         'pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
         gpu="a100",
@@ -80,7 +84,9 @@ def score_af2m_binding(af2m_dict: str, target_len: int, binders_len: list[int]) 
         # --------------------------------------------------------------------------
         # PAE; binder vs itself; mean target<>binder; target<>binder separately
         #
-        pae_binder[binder_n] = np.mean(pae_array[binder_start:binder_end, binder_start:binder_end])
+        pae_binder[binder_n] = np.mean(
+            pae_array[binder_start:binder_end, binder_start:binder_end]
+        )
         ipae[binder_n] = np.mean(
             [
                 np.mean(pae_array[:target_len, binder_start:binder_end]),
@@ -104,7 +110,8 @@ def score_af2m_binding(af2m_dict: str, target_len: int, binders_len: list[int]) 
         "pae_target": float(pae_target),
         "ipae": {k: float(v) for k, v in ipae.items()},
         "ipae_binder": {
-            k: [float(ipae_b) for ipae_b in ipae_binder[k]] for k, v in ipae_binder.items()
+            k: [float(ipae_b) for ipae_b in ipae_binder[k]]
+            for k, v in ipae_binder.items()
         },
     }
 
@@ -216,6 +223,8 @@ def main(
     use_precomputed_msas: bool = False,
     return_all_files: bool = False,
 ):
+    from datetime import datetime
+
     fasta_str = open(input_fasta).read()
     models = [int(model) for model in models.split(",")]
 
@@ -230,8 +239,11 @@ def main(
         return_all_files=return_all_files,
     )
 
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+    out_dir_full = Path(out_dir) / today
+
     for out_file, out_content in outputs:
-        (Path(out_dir) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
+        (Path(out_dir_full) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open((Path(out_dir) / Path(out_file)), "wb") as out:
+            with open((Path(out_dir_full) / Path(out_file)), "wb") as out:
                 out.write(out_content)
