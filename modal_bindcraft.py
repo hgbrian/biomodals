@@ -35,9 +35,10 @@ image = (
     .pip_install("git+https://github.com/sokrypton/ColabDesign.git")
     .pip_install("pyrosettacolabsetup")
     .run_commands(
-        "git clone https://github.com/martinpacesa/BindCraft /root/bindcraft"
-        " && chmod +x /root/bindcraft/functions/dssp"
-        " && chmod +x /root/bindcraft/functions/DAlphaBall.gcc"
+        "git clone https://github.com/martinpacesa/BindCraft /root/bindcraft",
+        "cd /root/bindcraft && git checkout c0a48d595d4976694aa979438712ac94c16620bb",
+        "chmod +x /root/bindcraft/functions/dssp",
+        "chmod +x /root/bindcraft/functions/DAlphaBall.gcc"
     )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign && mkdir /params"
@@ -49,6 +50,7 @@ image = (
     )
     .run_function(set_up_pyrosetta)
     .pip_install("jax[cuda]")
+    .pip_install("matplotlib==3.8.1") # https://github.com/martinpacesa/BindCraft/issues/4
 )
 
 
@@ -96,7 +98,7 @@ def bindcraft(
         load_af2_models,
         load_helicity,
         load_json_settings,
-        masked_binder_predict,
+        predict_binder_complex,
         mk_afdesign_model,
         mpnn_gen_sequence,
         perform_advanced_settings_check, 
@@ -554,7 +556,7 @@ def bindcraft(
 
                             ### Predict mpnn redesigned binder complex using masked templates
                             mpnn_complex_statistics, pass_af2_filters = (
-                                masked_binder_predict(
+                                predict_binder_complex(
                                     complex_prediction_model,
                                     mpnn_sequence["seq"],
                                     mpnn_design_name,
@@ -1061,6 +1063,7 @@ def main(
     number_of_final_designs: int = 1,
     binder_name: str = None,
     out_dir: str = "./out/bindcraft",
+    run_name: str = None,
 ):
     """
     target_hotspot_residues: What positions to target in your protein of interest? For example 1,2-10 or chain specific A1-10,B1-20 or entire chains A. If left blank, an appropriate site will be selected by the pipeline.
@@ -1085,9 +1088,7 @@ def main(
     )
 
     for out_file, out_content in outputs:
-        (Path(out_dir) / today / Path(out_file)).parent.mkdir(
-            parents=True, exist_ok=True
-        )
-        if out_content:
-            with open((Path(out_dir) / today / Path(out_file)), "wb") as out:
-                out.write(out_content)
+        output_path = Path(out_dir) / (run_name or today) / out_file
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "wb") as out:
+            out.write(out_content)
