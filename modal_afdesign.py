@@ -16,6 +16,11 @@ To do this, we maximize number of contacts at the interface and maximize pLDDT o
 1.   This notebook is in active development and was designed for demonstration purposes only.
 2.   Using AfDesign as the only "loss" function for design might be a bad idea, you may find 
      adversarial sequences (aka. sequences that trick AlphaFold).
+
+Example:
+```
+modal run modal_afdesign.py --target-chain C --pdb in/afdesign/ABC1.pdb
+```
 """
 
 import re
@@ -40,7 +45,7 @@ from colabdesign.shared.utils import copy_dict
 from colabdesign.af.alphafold.common import residue_constants
 import plotly.express as px
 
-from modal import Image, Mount, Stub
+from modal import Image, Mount, App
 
 LOCAL_IN = "in/afdesign"
 LOCAL_OUT = "out/afdesign"
@@ -50,7 +55,7 @@ DATA_DIR = "/"
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-stub = Stub()
+app = App()
 image = (Image
         .debian_slim()
         .apt_install("git", "wget", "aria2", "ffmpeg")
@@ -61,6 +66,7 @@ image = (Image
                         "mkdir /params")
         .run_commands("aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
                         "tar -xf alphafold_params_2022-12-06.tar -C /params")
+        .pip_install("matplotlib==3.8.1")
 )
 
 
@@ -171,7 +177,7 @@ def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
 # prep inputs
 #
 
-@stub.function(image=image, gpu=GPU, timeout=60*120,
+@app.function(image=image, gpu=GPU, timeout=60*120,
                mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
 def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:bool=True,
              binder_len:int=30, binder_seq=None, binder_chain=None,
@@ -352,9 +358,12 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     color_HP:bool = False #@param {type:"boolean"}
     animate:bool = True #@param {type:"boolean"}
 
-    model.plot_pdb(show_sidechains=show_sidechains,
-                    show_mainchains=show_mainchains,
-                    color=color, color_HP=color_HP, animate=animate)
+    try:
+        model.plot_pdb(show_sidechains=show_sidechains,
+                        show_mainchains=show_mainchains,
+                        color=color, color_HP=color_HP, animate=animate)
+    except Exception as e:
+        print("requires jupyter:", e)
 
     # takes 30s+ so may not be worth it
     html_content = model.animate(dpi=100)
@@ -400,7 +409,7 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
             (f"{out_name}.png", open(f"{out_name}.png", "rb").read())]
 
 
-@stub.local_entrypoint()
+@app.local_entrypoint()
 def main(pdb:str, target_chain:str,
          target_hotspot:str=None,
          target_flexible:bool=True,
