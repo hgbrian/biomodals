@@ -1,5 +1,10 @@
 """
 adapted from https://github.com/coreyhowe999/RSO
+
+Example:
+```
+modal run modal_rso.py --input-pdb ABC1.pdb --run-name ABC1 --binder-len 60
+```
 """
 
 import modal
@@ -38,7 +43,7 @@ app = modal.App("rso", image=image)
     gpu=GPU,
     timeout=TIMEOUT * 60,
 )
-def rso(pdb_name, pdb_str, traj_iters, binder_len):
+def rso(pdb_name, pdb_str, traj_iters, binder_len, chain, hotspot=None, thresholds=None):
     # Import colabdesign modules here
     from colabdesign import mk_afdesign_model, clear_mem
     from colabdesign.mpnn import mk_mpnn_model
@@ -50,6 +55,11 @@ def rso(pdb_name, pdb_str, traj_iters, binder_len):
 
     pdb_path = str(Path("/tmp/in_rso") / pdb_name)
     Path(pdb_path).parent.mkdir(parents=True, exist_ok=True)
+
+    if thresholds is None:
+        # e.g. proper thresholds vs extremely permissive
+        # thresholds = {"rmsd": 2, "plddt": 0.15, "pae": 0.4}
+        thresholds = {"rmsd": 10, "plddt": 1, "pae": 1}
 
     with open(pdb_path, "w") as f:
         f.write(pdb_str)
@@ -81,7 +91,7 @@ def rso(pdb_name, pdb_str, traj_iters, binder_len):
     clear_mem()
     af_model = mk_afdesign_model(protocol="binder")
     add_rg_loss(af_model)
-    af_model.prep_inputs(pdb_filename=pdb_path, chain="A", hotspot=None, binder_len=binder_len)
+    af_model.prep_inputs(pdb_filename=pdb_path, chain=chain, hotspot=hotspot, binder_len=binder_len)
 
     #
     # Adjust as needed
@@ -114,22 +124,23 @@ def rso(pdb_name, pdb_str, traj_iters, binder_len):
     results_df = pd.DataFrame()
 
     # output results
+
     for j, seq in enumerate(samples["seq"]):
         print("Predicting binder only")
         monomer_model.predict(seq=seq[-binder_len:], num_recycles=3)
-        if monomer_model.aux["losses"]["rmsd"] < 2.0:
+        if monomer_model.aux["losses"]["rmsd"] < thresholds["rmsd"]:
             print("Passed! Predicting binder with receptor using AF Multimer")
             binder_model.predict(seq=seq[-binder_len:], num_recycles=3)
-
-            # if plddt1 < 0.15 and i_pae < 0.4:
-            if True:
-                binder_model.save_pdb(f"binder_design_{j}.pdb")
-                results_df.loc[j, "pdb_id"] = f"binder_design_{j}.pdb"
+            if monomer_model.aux["losses"]["plddt"] < thresholds["plddt"] and monomer_model.aux["losses"]["pae"] < thresholds["pae"]:
+                binder_model.save_pdb(f"{Path(pdb_name).stem}_binder_design_{j}.pdb")
+                results_df.loc[j, "pdb_id"] = f"{Path(pdb_name).stem}_binder_design_{j}.pdb"
                 results_df.loc[j, "seq"] = seq[-binder_len:]
                 for key in binder_model.aux["log"]:
                     results_df.loc[j, key] = binder_model.aux["log"][key]
                 for weight in af_model.opt["weights"]:
                     results_df.loc[j, f"weights_{key}"] = weight
+        else:
+            print(f"Failed! RMSD: {monomer_model.aux['losses']['rmsd']} >= 2.0")
 
     results_df.to_csv("binder_design_scores.csv", index=False)
 
@@ -146,20 +157,25 @@ def main(
     input_pdb: str,
     num_designs: int = 1,
     traj_iters: int = 100,
-    binder_len: int = 50,
+    binder_len: int = 80,
+    chain: str = "A",
+    hotspot: str|None = None,
+    thresholds: str|None = None,
     out_dir="./out/rso",
+    run_name=None,
 ):
     pdb_str = open(input_pdb).read()
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     all_outputs = rso.starmap(
-        [(Path(input_pdb).name, pdb_str, traj_iters, binder_len) for _ in range(num_designs)]
+        [(Path(input_pdb).name, pdb_str, traj_iters, binder_len, chain, hotspot, thresholds)
+         for _ in range(num_designs)]
     )
 
     for bb_num, outputs in enumerate(all_outputs):
         for out_file, out_content in outputs:
-            output_path = Path(out_dir) / today / str(bb_num) / out_file
+            output_path = Path(out_dir) / (run_name or today) / str(bb_num) / out_file
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(output_path, "wb") as out:
                 out.write(out_content)
