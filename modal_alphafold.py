@@ -10,7 +10,7 @@ from pathlib import Path
 
 from modal import App, Image, Mount
 
-GPU = os.environ.get("MODAL_GPU", "A10G")
+GPU = os.environ.get("MODAL_GPU", "L40S")
 TIMEOUT = os.environ.get("MODAL_TIMEOUT", 20 * 60)
 LOCAL_MSA_DIR = "msas"
 if not Path(LOCAL_MSA_DIR).exists():
