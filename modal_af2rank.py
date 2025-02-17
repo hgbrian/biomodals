@@ -16,19 +16,16 @@ modal run modal_af2rank.py --input-pdb 4KRL.pdb --model-name "model_1_multimer_v
 import os
 from pathlib import Path
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 GPU = os.environ.get("MODAL_GPU", "A10G")
 TIMEOUT = os.environ.get("MODAL_TIMEOUT", 20 * 60)
-LOCAL_MSA_DIR = "msas"
-if not Path(LOCAL_MSA_DIR).exists():
-    Path(LOCAL_MSA_DIR).mkdir(exist_ok=True)
 
 image = (
     Image
     .micromamba()
     .apt_install("wget", "curl", "git", "g++")
-    .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1", "jax[cuda12_pip]")
+    .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.2", "jax[cuda12_pip]")
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign",
         "mkdir params",
@@ -43,20 +40,16 @@ image = (
 
 app = App("af2rank", image=image)
 
-
 with image.imports():
-    #@title import libraries
     import warnings
     warnings.simplefilter(action='ignore', category=FutureWarning)
 
     import os
 
-    import jax
     import matplotlib.pyplot as plt
     import numpy as np
-    from colabdesign import clear_mem, mk_af_model
-    from colabdesign.shared.utils import copy_dict
     from scipy.stats import spearmanr
+
 
     def tmscore(x,y):
         # save to dumpy pdb files
@@ -125,6 +118,8 @@ with image.imports():
             self.reset()
 
         def reset(self):
+            from colabdesign import clear_mem, mk_af_model
+            from colabdesign.shared.utils import copy_dict
             self.model = mk_af_model(protocol="fixbb",
                                      use_templates=True,
                                      use_multimer=self.args["use_multimer"],
@@ -147,6 +142,7 @@ with image.imports():
             self.wt = self.model._params["seq"][0].argmax(-1)
 
         def _get_score(self):
+            from colabdesign.shared.utils import copy_dict
             score = copy_dict(self.model.aux["log"])
 
             score["plddt"] = score["plddt"]
