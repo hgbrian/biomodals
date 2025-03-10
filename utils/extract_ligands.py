@@ -24,6 +24,7 @@ import requests
 LIGAND_EXPO_FILENAME = "Components-smiles-stereo-oe.smi"
 LIGAND_EXPO_URL = f"http://ligand-expo.rcsb.org/dictionaries/{LIGAND_EXPO_FILENAME}"
 
+
 @cache
 def _read_ligand_expo():
     """
@@ -33,25 +34,27 @@ def _read_ligand_expo():
     :return: Ligand Expo as a dictionary with ligand id as the key
     """
     if not Path(LIGAND_EXPO_FILENAME).exists():
-        with open(LIGAND_EXPO_FILENAME, 'wb') as out:
+        with open(LIGAND_EXPO_FILENAME, "wb") as out:
             resp = requests.get(LIGAND_EXPO_URL, allow_redirects=True, timeout=300)
             out.write(resp.content)
 
-    df_lig = pd.read_csv(LIGAND_EXPO_FILENAME, sep="\t", header=None, names=["SMILES", "ID", "Name"])
+    df_lig = pd.read_csv(
+        LIGAND_EXPO_FILENAME, sep="\t", header=None, names=["SMILES", "ID", "Name"]
+    )
     df_lig.set_index("ID", inplace=True)
 
     return df_lig.to_dict()
 
 
-def _split_pdb_into_protein_and_ligand(pdb_name:str):
+def _split_pdb_into_protein_and_ligand(pdb_name: str):
     """
     Split a protein-ligand pdb into protein and ligand components
     :param pdb_name:
     :return: protein, ligand
     """
     pdb = prody.parsePDB(pdb_name)
-    protein_sel = pdb.select('protein')
-    ligand_sel = pdb.select('not protein and not water')
+    protein_sel = pdb.select("protein")
+    ligand_sel = pdb.select("not protein and not water")
     return protein_sel, ligand_sel
 
 
@@ -80,7 +83,7 @@ def _process_ligand(ligand, res_name, chain, ligand_smiles=None):
         return None, None
 
     if ligand_smiles is None:
-        ligand_smiles = expo_dict['SMILES'][res_name]
+        ligand_smiles = expo_dict["SMILES"][res_name]
 
     print("ligand_smiles", ligand_smiles)
     template = AllChem.MolFromSmiles(ligand_smiles)
@@ -126,7 +129,7 @@ def _process_ligand_alt(ligand, res_name, chain, ligand_smiles=None):
     return new_mol, sub_smiles
 
 
-def _write_sel_to_pdb(protein, out_pdb_file:str) -> bool:
+def _write_sel_to_pdb(protein, out_pdb_file: str) -> bool:
     """
     Write a prody protein to a pdb file
     :param protein: protein object from prody
@@ -137,7 +140,7 @@ def _write_sel_to_pdb(protein, out_pdb_file:str) -> bool:
     return out_pdb_file
 
 
-def _write_mol_to_sdf(rd_mol, out_sdf_file:str) -> bool:
+def _write_mol_to_sdf(rd_mol, out_sdf_file: str) -> bool:
     """
     Write an RDKit molecule to an SD file
     :param rd_mol:
@@ -151,9 +154,14 @@ def _write_mol_to_sdf(rd_mol, out_sdf_file:str) -> bool:
     return out_sdf_file
 
 
-def extract_ligand(pdb_name:str, ligand_name:str, ligand_chain:str, out_pdb_file:str,
-                   out_sdf_file:str|None=None,
-                   ligand_smiles:str|None=None) -> tuple[str, str, str]:
+def extract_ligand(
+    pdb_name: str,
+    ligand_name: str,
+    ligand_chain: str,
+    out_pdb_file: str,
+    out_sdf_file: str | None = None,
+    ligand_smiles: str | None = None,
+) -> tuple[str, str, str]:
     """
     Read Ligand Expo data, split pdb into protein and ligands,
     write protein pdb, write ligand sdf files
@@ -165,7 +173,9 @@ def extract_ligand(pdb_name:str, ligand_name:str, ligand_chain:str, out_pdb_file
     :ligand_smiles: ligand smiles
     :return:
     """
-    print(pdb_name, ligand_name, ligand_chain, out_pdb_file, out_sdf_file, ligand_smiles)
+    print(
+        pdb_name, ligand_name, ligand_chain, out_pdb_file, out_sdf_file, ligand_smiles
+    )
     # ----------------------------
     # First write out protein part
     #
@@ -182,11 +192,13 @@ def extract_ligand(pdb_name:str, ligand_name:str, ligand_chain:str, out_pdb_file
     print("ligand_name", ligand_name)
 
     if out_sdf_file is None:
-        out_sdf_file = Path(out_pdb_file).with_suffix('') + f"_{ligand_name}.sdf"
+        out_sdf_file = Path(out_pdb_file).with_suffix("") + f"_{ligand_name}.sdf"
 
     print("ligand_smileses should be None", ligand_smiles)
 
-    new_mol, new_mol_smiles = _process_ligand(ligand_sel, ligand_name, ligand_chain, ligand_smiles)
+    new_mol, new_mol_smiles = _process_ligand(
+        ligand_sel, ligand_name, ligand_chain, ligand_smiles
+    )
     if new_mol is None:
         raise ValueError(f"{ligand_name} molecule object is None")
 
@@ -207,14 +219,24 @@ def extract_all_ligands(pdb_name, out_pdb_name):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='Extract ligands from a PDB file.')
-    parser.add_argument('pdb_id', type=str, help='PDB ID')
-    parser.add_argument('ligand_names', type=str, help='Comma-delimited list of ligand names')
-    parser.add_argument('--chains', type=str, default=None, help='Comma-delimited list of chains for each ligand')
-    
+    parser = argparse.ArgumentParser(description="Extract ligands from a PDB file.")
+    parser.add_argument("pdb_id", type=str, help="PDB ID")
+    parser.add_argument(
+        "ligand_names", type=str, help="Comma-delimited list of ligand names"
+    )
+    parser.add_argument(
+        "--chains",
+        type=str,
+        default=None,
+        help="Comma-delimited list of chains for each ligand",
+    )
+
     args = parser.parse_args()
     args_ligand_names = args.ligand_names.split(",")
     args_chains = args.chains.split(",") if args.chains is not None else None
 
-    outputs = extract_ligands(args.pdb_id, args_ligand_names, args_chains)
+    outputs = []
+    for i, ligand_name in enumerate(args_ligand_names):
+        chain = args_chains[i] if args_chains is not None and i < len(args_chains) else "A"
+        outputs.append(extract_ligand(args.pdb_id, ligand_name, chain, f"{args.pdb_id}_protein.pdb"))
     print(outputs)

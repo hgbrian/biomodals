@@ -24,7 +24,9 @@ def download_model():
 image = (
     Image.micromamba(python_version="3.9")
     .apt_install(["git", "wget", "gcc", "g++", "libffi-dev"])
-    .pip_install(["torch==1.13.1+cu117"], index_url="https://download.pytorch.org/whl/cu117")
+    .pip_install(
+        ["torch==1.13.1+cu117"], index_url="https://download.pytorch.org/whl/cu117"
+    )
     .pip_install(["fair-esm"])
     .pip_install(["pandas", "matplotlib"])
     .run_function(download_model, gpu=GPU)
@@ -64,7 +66,9 @@ def esm2(fasta_name: str, fasta_str: str, make_figures: bool = False):
 
     for i, (label, seq) in enumerate(data):
         # Find the position of the mask token for this sequence
-        mask_position = (batch_tokens[i] == alphabet.mask_idx).nonzero(as_tuple=True)[0][0]
+        mask_position = (batch_tokens[i] == alphabet.mask_idx).nonzero(as_tuple=True)[
+            0
+        ][0]
 
         # Get logits for the masked position
         logits = results["logits"][i, mask_position]
@@ -83,7 +87,9 @@ def esm2(fasta_name: str, fasta_str: str, make_figures: bool = False):
         # Get the best prediction
         best_prediction = alphabet.get_tok(top_indices[0])
         best_probability = top_probs[0].item()
-        print(f"\nBest prediction for '{label}': {best_prediction} {best_probability}\n")
+        print(
+            f"\nBest prediction for '{label}': {best_prediction} {best_probability}\n"
+        )
 
         if make_figures:
             # Visualize the contact map
@@ -105,13 +111,23 @@ def esm2(fasta_name: str, fasta_str: str, make_figures: bool = False):
 
 
 @app.local_entrypoint()
-def main(input_fasta: str, make_figures: bool = False, out_dir: str = "."):
+def main(
+    input_fasta: str,
+    make_figures: bool = False,
+    out_dir: str = "./out/esm2_predict_masked",
+    run_name: str = None,
+):
+    from datetime import datetime
+
     fasta_str = open(input_fasta).read()
 
     outputs = esm2.remote(Path(input_fasta).name, fasta_str, make_figures)
 
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+
     for out_file, out_content in outputs:
-        (Path(out_dir) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
+        output_path = Path(out_dir) / (run_name or today) / Path(out_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open((Path(out_dir) / Path(out_file)), "wb") as out:
+            with open(output_path, "wb") as out:
                 out.write(out_content)

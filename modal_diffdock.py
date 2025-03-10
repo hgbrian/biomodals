@@ -26,7 +26,6 @@ import modal
 from modal import App, Image, Mount
 
 LOCAL_IN = "./in/diffdock"
-LOCAL_OUT = "./out/diffdock"
 REMOTE_IN = "/in"
 
 GPU_SIZE = os.environ.get("GPU_SIZE", "80GB")
@@ -39,7 +38,9 @@ image = (
     Image.micromamba(python_version="3.9")
     .apt_install(["git", "wget", "nano"])
     .run_commands("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib")
-    .pip_install(["torch==1.13.1+cu117"], index_url="https://download.pytorch.org/whl/cu117")
+    .pip_install(
+        ["torch==1.13.1+cu117"], index_url="https://download.pytorch.org/whl/cu117"
+    )
     .micromamba_install("prody==2.2.0", channels=["conda-forge", "bioconda"])
     .pip_install(
         [
@@ -91,7 +92,10 @@ def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
 
     outputs = []
     for pdb, ligand in pdbs_ligands:
-        _pdb, _ligand = Path(pdb).relative_to(LOCAL_IN), Path(ligand).relative_to(LOCAL_IN)
+        _pdb, _ligand = (
+            Path(pdb).relative_to(LOCAL_IN),
+            Path(ligand).relative_to(LOCAL_IN),
+        )
         remote_pdb, remote_ligand = Path(REMOTE_IN) / _pdb, Path(REMOTE_IN) / _ligand
         out_dir = f"./out_{_pdb.stem}_{_ligand.stem}"
 
@@ -117,16 +121,32 @@ def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
 
 
 @app.local_entrypoint()
-def main(pdb_file: str, mol2_file: str, batch_size: int = 5):
+def main(
+    pdb_file: str,
+    mol2_file: str,
+    batch_size: int = 5,
+    out_dir: str = "./out/diffdock",
+    run_name: str = None,
+):
+    from datetime import datetime
+
     pdbs_ligands = [
-        (_pdb.strip(), _mol2.strip()) for _pdb, _mol2 in zip(pdb_file.split(","), mol2_file.split(","))
+        (_pdb.strip(), _mol2.strip())
+        for _pdb, _mol2 in zip(pdb_file.split(","), mol2_file.split(","))
     ]
 
     outputs = run_diffdock.remote(pdbs_ligands, batch_size)
 
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+
     for pdb, ligand, out_file, out_content in outputs:
-        out_path = Path(LOCAL_OUT) / Path(f"{pdb}_{ligand}") / Path(out_file)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path = (
+            Path(out_dir)
+            / (run_name or today)
+            / Path(f"{pdb}_{ligand}")
+            / Path(out_file)
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open(out_path, "wb") as out:
+            with open(output_path, "wb") as out:
                 out.write(out_content)

@@ -43,6 +43,7 @@ The output is markdown of the most summary as bullet points.
 """
 '''
 
+
 def install_ollama():
     os.system("ollama serve &")  # not working with subprocess.run?
     sleep(6)
@@ -54,7 +55,9 @@ def install_ollama():
     else:
         raise Exception("ollama not running")
 
-    res = run(f"ollama run {MODEL_INFO['model']}", shell=True, check=True, capture_output=True)
+    res = run(
+        f"ollama run {MODEL_INFO['model']}", shell=True, check=True, capture_output=True
+    )
 
     with open("/Modelfile", "w") as out:
         out.write(modelfile)
@@ -124,7 +127,11 @@ class Llama:
             raise Exception("ollama not running")
 
         url = f"{OLLAMA_URL}/api/generate"
-        data = {"model": "podcast_summarizer", "prompt": f"{transcript}", "stream": False}
+        data = {
+            "model": "podcast_summarizer",
+            "prompt": f"{transcript}",
+            "stream": False,
+        }
         response = requests.post(url, json=data)
         response.raise_for_status()
 

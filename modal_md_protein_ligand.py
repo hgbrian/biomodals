@@ -7,7 +7,6 @@ from modal import App, Image, Mount
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/md_protein_ligand"
-LOCAL_OUT = "./out/md_protein_ligand"
 REMOTE_IN = "/in"
 GPU = os.environ.get("MODAL_GPU", "T4")  # T4 for testing
 TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
@@ -126,8 +125,8 @@ def main(
     mutations: str = None,
     temperature: int = 300,
     equilibration_steps: int = 200,
-    out_dir_date=True,
-    out_dir_root: str = ".",
+    out_dir: str = "./out/md_protein_ligand",
+    run_name: str = None,
 ):
     """
     MD simulation of protein + ligand.
@@ -144,8 +143,10 @@ def main(
         Follows PDBFixer notation, BUT you must include the chains to mutate too. Default is None.
     :param temperature: Integer representing the temperature in the simulation. Default is 300.
     :param equilibration_steps: Integer representing the number of equilibration steps. Default is 200.
-    :param out_dir_root: String representing the root directory for output. Default is "out".
+    :param out_dir: String representing the output directory. Default is "./out/md_protein_ligand".
+    :param run_name: String representing the name of the run for output folder. Default is None.
     """
+    from datetime import datetime
 
     minimize_only = True if not num_steps else False
     if ligand_id is not None:
@@ -163,15 +164,16 @@ def main(
         mutations.split(",") if mutations else None,
         temperature,
         equilibration_steps,
-        out_dir_root,
+        out_dir_root=".",
     )
 
-    out_dir_date = datetime.now().strftime("%Y%m%d%H%M")[2:] if out_dir_date else "."
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
 
     for out_file, out_content in outputs.values():
         if out_content:
-            (Path(LOCAL_OUT) / out_dir_date / out_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(Path(LOCAL_OUT) / out_dir_date / out_file, "wb") as out:
+            output_path = Path(out_dir) / (run_name or today) / out_file
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "wb") as out:
                 out.write(out_content)
 
     print("Outputs:", {k: v[0] for k, v in outputs.items()})

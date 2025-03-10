@@ -53,20 +53,29 @@ REMOTE_IN = "/in"
 GPU = "a100"
 DATA_DIR = "/"
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 app = App()
-image = (Image
-        .debian_slim()
-        .apt_install("git", "wget", "aria2", "ffmpeg")
-        .pip_install("jax[cuda12_pip]", find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html")
-        .pip_install("pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1")
-        .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
-        .run_commands("ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
-                        "mkdir /params")
-        .run_commands("aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
-                        "tar -xf alphafold_params_2022-12-06.tar -C /params")
-        .pip_install("matplotlib==3.8.1")
+image = (
+    Image.debian_slim()
+    .apt_install("git", "wget", "aria2", "ffmpeg")
+    .pip_install(
+        "jax[cuda12_pip]",
+        find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html",
+    )
+    .pip_install(
+        "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
+    )
+    .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
+    .run_commands(
+        "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
+        "mkdir /params"
+    )
+    .run_commands(
+        "aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
+        "tar -xf alphafold_params_2022-12-06.tar -C /params"
+    )
+    .pip_install("matplotlib==3.8.1")
 )
 
 
@@ -75,24 +84,25 @@ image = (Image
 #
 def add_cyclic_offset(self):
     """add cyclic offset to connect N and C term head to tail"""
+
     def _cyclic_offset(L):
         i = np.arange(L)
-        ij = np.stack([i,i+L],-1)
-        offset = i[:,None] - i[None,:]
-        c_offset = np.abs(ij[:,None,:,None] - ij[None,:,None,:]).min((2,3))
+        ij = np.stack([i, i + L], -1)
+        offset = i[:, None] - i[None, :]
+        c_offset = np.abs(ij[:, None, :, None] - ij[None, :, None, :]).min((2, 3))
         return np.sign(offset) * c_offset
 
     idx = self._inputs["residue_index"]
-    offset = np.array(idx[:,None] - idx[None,:])
-  
+    offset = np.array(idx[:, None] - idx[None, :])
+
     if self.protocol == "binder":
         c_offset = _cyclic_offset(self._binder_len)
-        offset[self._target_len:,self._target_len:] = c_offset
-  
+        offset[self._target_len :, self._target_len :] = c_offset
+
     if self.protocol in ["fixbb", "partial", "hallucination"]:
         Ln = 0
         for L in self._lengths:
-            offset[Ln:Ln+L,Ln:Ln+L] = _cyclic_offset(L)
+            offset[Ln : Ln + L, Ln : Ln + L] = _cyclic_offset(L)
             Ln += L
 
     self._inputs["offset"] = offset
@@ -111,6 +121,7 @@ class ResidueRangeSelect(Select):
         within_range = self.start <= residue.get_id()[1] <= self.end
         correct_chain = residue.parent.id in self.chain_ids
         return within_range and correct_chain
+
 
 def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
     # create a PDBParser object
@@ -133,6 +144,7 @@ def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
 
     return temp_file.name
 
+
 # ------------------------------------------------------------------------------
 # BN added this merging tool
 #
@@ -140,9 +152,14 @@ def join_chains(pdb_file, target_chain, merge_chains):
     """Use pdb-tools to combine the pdb file into one chain.
     Probably unnecessary!"""
     with NamedTemporaryFile(suffix=".pdb", delete=False) as tf:
-        subprocess.run(f"pdb_selchain -{','.join(merge_chains)} {pdb_file} | "
-                       f"pdb_chain -{target_chain} | pdb_reres -1 > {tf.name}", shell=True, check=True)
+        subprocess.run(
+            f"pdb_selchain -{','.join(merge_chains)} {pdb_file} | "
+            f"pdb_chain -{target_chain} | pdb_reres -1 > {tf.name}",
+            shell=True,
+            check=True,
+        )
         return tf.name
+
 
 # ------------------------------------------------------------------------------
 # BN added this function
@@ -150,15 +167,19 @@ def join_chains(pdb_file, target_chain, merge_chains):
 def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
     """Report the residues within `distance` of the ligand as a dict."""
     parser = PDBParser()
-    structure = parser.get_structure('protein', pdb_file)
+    structure = parser.get_structure("protein", pdb_file)
 
     # Get all atoms in the protein
-    protein_atoms = [atom for atom in structure.get_atoms()
-                     if atom.parent.get_resname() != ligand_id
-                     and is_aa(atom.parent)]
+    protein_atoms = [
+        atom
+        for atom in structure.get_atoms()
+        if atom.parent.get_resname() != ligand_id and is_aa(atom.parent)
+    ]
 
     # Get all atoms in the ligand
-    ligand_atoms = [atom for atom in structure.get_atoms() if atom.parent.get_resname() == ligand_id]
+    ligand_atoms = [
+        atom for atom in structure.get_atoms() if atom.parent.get_resname() == ligand_id
+    ]
 
     # Create a NeighborSearch object
     ns = NeighborSearch(protein_atoms)
@@ -173,22 +194,35 @@ def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
 
     return nearby_residues
 
+
 # ------------------------------------------------------------------------------
 # prep inputs
 #
 
-@app.function(image=image, gpu=GPU, timeout=60*120,
-               mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)])
-def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:bool=True,
-             binder_len:int=30, binder_seq=None, binder_chain=None,
-             set_fixed_aas = None,
-             cyclic_peptide:bool=True,
-             use_multimer:bool = False,
-             num_recycles:int = 3,
-             num_models = 2,
-             pdb_redo:bool=True,
-             soft_iters:int=120,
-             hard_iters:int=32):
+
+@app.function(
+    image=image,
+    gpu=GPU,
+    timeout=60 * 120,
+    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+)
+def afdesign(
+    pdb: str,
+    target_chain: str,
+    target_hotspot=None,
+    target_flexible: bool = True,
+    binder_len: int = 30,
+    binder_seq=None,
+    binder_chain=None,
+    set_fixed_aas=None,
+    cyclic_peptide: bool = True,
+    use_multimer: bool = False,
+    num_recycles: int = 3,
+    num_models=2,
+    pdb_redo: bool = True,
+    soft_iters: int = 120,
+    hard_iters: int = 32,
+):
     """
     pdb: enter PDB code or UniProt code (to fetch AlphaFoldDB model) or leave blink to upload your own
     target_chain: chain to design binder against
@@ -228,13 +262,15 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     if (Path(REMOTE_IN) / Path(pdb).relative_to(LOCAL_IN)).is_file():
         pdb = str(Path(REMOTE_IN) / Path(pdb).relative_to(LOCAL_IN))
 
-    x = {"pdb_filename":pdb,
-         "chain":target_chain,
-         "binder_len":binder_len,
-         "binder_chain":binder_chain,
-         "hotspot":target_hotspot,
-         "use_multimer":use_multimer,
-         "rm_target_seq":target_flexible}
+    x = {
+        "pdb_filename": pdb,
+        "chain": target_chain,
+        "binder_len": binder_len,
+        "binder_chain": binder_chain,
+        "hotspot": target_hotspot,
+        "use_multimer": use_multimer,
+        "rm_target_seq": target_flexible,
+    }
 
     # ------------------------------------------------------------------------------
     # BN added this to extract only chains A and B
@@ -251,7 +287,9 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     _bias = None
     if set_fixed_aas is not None:
         aa_order = residue_constants.restype_order
-        assert len(set_fixed_aas) == binder_len, f"add_fixed_aas: {len(set_fixed_aas)} must be same length as binder_len: {binder_len}"
+        assert (
+            len(set_fixed_aas) == binder_len
+        ), f"add_fixed_aas: {len(set_fixed_aas)} must be same length as binder_len: {binder_len}"
         assert len(aa_order.keys()) == 20, "restype_order has changed"
         _bias = np.zeros((binder_len, len(residue_constants.restype_order)))
         for n, aa in enumerate(set_fixed_aas):
@@ -262,12 +300,13 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     x_prev = None
     if "x_prev" not in dir() or x != x_prev:
         clear_mem()
-        model = mk_afdesign_model(protocol="binder",
-                                  use_multimer=x["use_multimer"],
-                                  num_recycles=num_recycles,
-                                  recycle_mode="sample",
-                                  data_dir=DATA_DIR
-                                  )
+        model = mk_afdesign_model(
+            protocol="binder",
+            use_multimer=x["use_multimer"],
+            num_recycles=num_recycles,
+            recycle_mode="sample",
+            data_dir=DATA_DIR,
+        )
         model.prep_inputs(**x, ignore_missing=False)
         # BN make cyclic peptide
         if cyclic_peptide:
@@ -290,18 +329,18 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     # `logits` - GD optimize logits inputs (continious)
     # `soft` - GD optimize softmax(logits) inputs (probabilities)
     # `hard` - GD optimize one_hot(logits) inputs (discrete)
-    # WARNING: The output sequence from `pssm`,`logits`,`soft` is not one_hot. 
-    # To get a valid sequence use the other optimizers, or redesign the output backbone 
+    # WARNING: The output sequence from `pssm`,`logits`,`soft` is not one_hot.
+    # To get a valid sequence use the other optimizers, or redesign the output backbone
     # with another protocol like ProteinMPNN.
     #
 
-    optimizer:str = "pssm_semigreedy" #@param ["pssm_semigreedy", "3stage", "semigreedy", "pssm", "logits", "soft", "hard"]
+    optimizer: str = "pssm_semigreedy"  # @param ["pssm_semigreedy", "3stage", "semigreedy", "pssm", "logits", "soft", "hard"]
 
     # advanced GD settings
-    GD_method:str = "sgd" #@param ["adabelief", "adafactor", "adagrad", "adam", "adamw", "fromage", "lamb", "lars", "noisy_sgd", "dpsgd", "radam", "rmsprop", "sgd", "sm3", "yogi"]
-    learning_rate:float = 0.1 #@param {type:"raw"}
-    norm_seq_grad:bool = True
-    dropout:bool = True
+    GD_method: str = "sgd"  # @param ["adabelief", "adafactor", "adagrad", "adam", "adamw", "fromage", "lamb", "lars", "noisy_sgd", "dpsgd", "radam", "rmsprop", "sgd", "sm3", "yogi"]
+    learning_rate: float = 0.1  # @param {type:"raw"}
+    norm_seq_grad: bool = True
+    dropout: bool = True
 
     # ------------------------------------------------------------------------------
     # BN added Cysteine cyclic peptide bias here
@@ -311,22 +350,22 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     else:
         model.restart(seq=binder_seq)
 
-    model.set_optimizer(optimizer=GD_method,
-                        learning_rate=learning_rate,
-                        norm_seq_grad=norm_seq_grad)
+    model.set_optimizer(
+        optimizer=GD_method, learning_rate=learning_rate, norm_seq_grad=norm_seq_grad
+    )
     models = model._model_names[:num_models]
 
-    flags = {"num_recycles":num_recycles,
-             "models":models,
-             "dropout":dropout}
+    flags = {"num_recycles": num_recycles, "models": models, "dropout": dropout}
 
     if optimizer == "3stage":
         model.design_3stage(120, 60, 10, **flags)
-        pssm = softmax(model._tmp["seq_logits"],-1)
+        pssm = softmax(model._tmp["seq_logits"], -1)
 
     if optimizer == "pssm_semigreedy":
-        model.design_pssm_semigreedy(soft_iters=soft_iters, hard_iters=hard_iters, **flags)
-        pssm = softmax(model._tmp["seq_logits"],1)
+        model.design_pssm_semigreedy(
+            soft_iters=soft_iters, hard_iters=hard_iters, **flags
+        )
+        pssm = softmax(model._tmp["seq_logits"], 1)
 
     if optimizer == "semigreedy":
         model.design_pssm_semigreedy(0, 32, **flags)
@@ -335,33 +374,39 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     if optimizer == "pssm":
         model.design_logits(120, e_soft=1.0, num_models=1, ramp_recycles=True, **flags)
         model.design_soft(32, num_models=1, **flags)
-        flags.update({"dropout":False,"save_best":True})
+        flags.update({"dropout": False, "save_best": True})
         model.design_soft(10, num_models=num_models, **flags)
-        pssm = softmax(model.aux["seq"]["logits"],-1)
+        pssm = softmax(model.aux["seq"]["logits"], -1)
 
-    O = {"logits":model.design_logits,
-         "soft":model.design_soft,
-         "hard":model.design_hard}
+    optimizer_funcs = {
+        "logits": model.design_logits,
+        "soft": model.design_soft,
+        "hard": model.design_hard,
+    }
 
-    if optimizer in O:
-        O[optimizer](120, num_models=1, ramp_recycles=True, **flags)
-        flags.update({"dropout":False, "save_best":True})
-        O[optimizer](10, num_models=num_models, **flags)
-        pssm = softmax(model.aux["seq"]["logits"],-1)
+    if optimizer in optimizer_funcs:
+        optimizer_funcs[optimizer](120, num_models=1, ramp_recycles=True, **flags)
+        flags.update({"dropout": False, "save_best": True})
+        optimizer_funcs[optimizer](10, num_models=num_models, **flags)
+        pssm = softmax(model.aux["seq"]["logits"], -1)
 
     model.save_pdb(f"{model.protocol}.pdb")
 
     # display hallucinated protein {run: "auto"}
-    color:str = "pLDDT" #@param ["chain", "pLDDT", "rainbow"]
-    show_sidechains:bool = False #@param {type:"boolean"}
-    show_mainchains:bool = True #@param {type:"boolean"}
-    color_HP:bool = False #@param {type:"boolean"}
-    animate:bool = True #@param {type:"boolean"}
+    color: str = "pLDDT"  # @param ["chain", "pLDDT", "rainbow"]
+    show_sidechains: bool = False  # @param {type:"boolean"}
+    show_mainchains: bool = True  # @param {type:"boolean"}
+    color_HP: bool = False  # @param {type:"boolean"}
+    animate: bool = True  # @param {type:"boolean"}
 
     try:
-        model.plot_pdb(show_sidechains=show_sidechains,
-                        show_mainchains=show_mainchains,
-                        color=color, color_HP=color_HP, animate=animate)
+        model.plot_pdb(
+            show_sidechains=show_sidechains,
+            show_mainchains=show_mainchains,
+            color=color,
+            color_HP=color_HP,
+            animate=animate,
+        )
     except Exception as e:
         print("requires jupyter:", e)
 
@@ -374,9 +419,9 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     # ------------------------------------------------------------------------------
     # BN added this
     # Add data into the REMARK section of the PDB file
-    # 
+    #
     pdb_txt = open(f"{out_name}.pdb").read()
-    with open(f"{out_name}.pdb", 'w') as out:
+    with open(f"{out_name}.pdb", "w") as out:
         for n, (k, v) in enumerate(model._tmp["best"]["aux"]["log"].items()):
             remark_text = f"{k}: {v}"
             remark_line = f"REMARK {n+1:<3} {remark_text:<69}\n"
@@ -388,43 +433,49 @@ def afdesign(pdb:str, target_chain:str, target_hotspot=None, target_flexible:boo
     # ------------------------------------------------------------------------------
     # Amino acid probabilties
     #
-    alphabet = "ACDEFGHIKLMNPQRSTVWY"
+    # Use residue_constants.restypes for amino acid alphabet
     if "pssm" in dir() and pssm is not None:
-      fig = px.imshow(pssm.mean(0).T,
-                      labels=dict(x="positions", y="amino acids", color="probability"),
-                      y=residue_constants.restypes,
-                      zmin=0,
-                      zmax=1,
-                      template="simple_white",
-                    )
-      fig.update_xaxes(side="top")
-      fig.write_image(f"{out_name}.png")
+        fig = px.imshow(
+            pssm.mean(0).T,
+            labels=dict(x="positions", y="amino acids", color="probability"),
+            y=residue_constants.restypes,
+            zmin=0,
+            zmax=1,
+            template="simple_white",
+        )
+        fig.update_xaxes(side="top")
+        fig.write_image(f"{out_name}.png")
 
     # plddt etc in here
     log = model._tmp["best"]["aux"]["log"]
 
-    return [(f"{out_name}.log", str(log).encode("utf-8")),
-            (f"{out_name}.html", html_content.encode("utf-8")),
-            (f"{out_name}.pdb", open(f"{out_name}.pdb", "rb").read()),
-            (f"{out_name}.png", open(f"{out_name}.png", "rb").read())]
+    return [
+        (f"{out_name}.log", str(log).encode("utf-8")),
+        (f"{out_name}.html", html_content.encode("utf-8")),
+        (f"{out_name}.pdb", open(f"{out_name}.pdb", "rb").read()),
+        (f"{out_name}.png", open(f"{out_name}.png", "rb").read()),
+    ]
 
 
 @app.local_entrypoint()
-def main(pdb:str, target_chain:str,
-         target_hotspot:str=None,
-         target_flexible:bool=True,
-         binder_len:int=12,
-         binder_seq:str=None,
-         binder_chain:str=None,
-         set_fixed_aas:str=None,
-         linear_peptide:bool=False,
-         use_multimer:bool=False,
-         num_recycles:int=3,
-         num_models:int=2,
-         use_rcsb_pdb:bool=False,
-         soft_iters:int=30,
-         hard_iters:int=6,
-         num_parallel:int=1):
+def main(
+    pdb: str,
+    target_chain: str,
+    target_hotspot: str = None,
+    target_flexible: bool = True,
+    binder_len: int = 12,
+    binder_seq: str = None,
+    binder_chain: str = None,
+    set_fixed_aas: str = None,
+    linear_peptide: bool = False,
+    use_multimer: bool = False,
+    num_recycles: int = 3,
+    num_models: int = 2,
+    use_rcsb_pdb: bool = False,
+    soft_iters: int = 30,
+    hard_iters: int = 6,
+    num_parallel: int = 1,
+):
     """120 soft iters, 32 hard iters is recommended"""
 
     assert hard_iters >= 2, "fails on hard_iters=1"
@@ -432,16 +483,31 @@ def main(pdb:str, target_chain:str,
     # I can't figure out how to use kwargs with map so order is important
     pdb_redo = not use_rcsb_pdb
     cyclic_peptide = not linear_peptide
-    args = tuple((pdb, target_chain, target_hotspot, target_flexible,
-                  binder_len, binder_seq, binder_chain, set_fixed_aas,
-                  cyclic_peptide, use_multimer, num_recycles, num_models, pdb_redo,
-                  soft_iters, hard_iters))
+    args = tuple(
+        (
+            pdb,
+            target_chain,
+            target_hotspot,
+            target_flexible,
+            binder_len,
+            binder_seq,
+            binder_chain,
+            set_fixed_aas,
+            cyclic_peptide,
+            use_multimer,
+            num_recycles,
+            num_models,
+            pdb_redo,
+            soft_iters,
+            hard_iters,
+        )
+    )
 
     # use starmap to pass multiple args
     for outputs in afdesign.starmap([args for _ in range(num_parallel)]):
-        for (out_file, out_content) in outputs:
+        for out_file, out_content in outputs:
             out_path = Path(LOCAL_OUT) / out_file
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_content:
-                with open(out_path, 'wb') as out:
+                with open(out_path, "wb") as out:
                     out.write(out_content)

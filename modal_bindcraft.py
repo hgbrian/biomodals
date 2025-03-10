@@ -38,7 +38,7 @@ image = (
         "git clone https://github.com/martinpacesa/BindCraft /root/bindcraft",
         "cd /root/bindcraft && git checkout c0a48d595d4976694aa979438712ac94c16620bb",
         "chmod +x /root/bindcraft/functions/dssp",
-        "chmod +x /root/bindcraft/functions/DAlphaBall.gcc"
+        "chmod +x /root/bindcraft/functions/DAlphaBall.gcc",
     )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign && mkdir /params"
@@ -50,7 +50,9 @@ image = (
     )
     .run_function(set_up_pyrosetta)
     .pip_install("jax[cuda]")
-    .pip_install("matplotlib==3.8.1") # https://github.com/martinpacesa/BindCraft/issues/4
+    .pip_install(
+        "matplotlib==3.8.1"
+    )  # https://github.com/martinpacesa/BindCraft/issues/4
 )
 
 
@@ -101,7 +103,7 @@ def bindcraft(
         predict_binder_complex,
         mk_afdesign_model,
         mpnn_gen_sequence,
-        perform_advanced_settings_check, 
+        perform_advanced_settings_check,
         pr,
         pr_relax,
         predict_binder_alone,
@@ -139,21 +141,21 @@ def bindcraft(
     elif design_protocol == "Peptide":
         design_protocol_tag = "peptide_3stage_multimer"
     else:
-        raise ValueError(f"Unsupported design protocol")
+        raise ValueError("Unsupported design protocol")
 
     if interface_protocol == "AlphaFold2":
         interface_protocol_tag = ""
     elif interface_protocol == "MPNN":
         interface_protocol_tag = "_mpnn"
     else:
-        raise ValueError(f"Unsupported interface protocol")
+        raise ValueError("Unsupported interface protocol")
 
     if template_protocol == "Default":
         template_protocol_tag = ""
     elif template_protocol == "Masked":
         template_protocol_tag = "_flexible"
     else:
-        raise ValueError(f"Unsupported template protocol")
+        raise ValueError("Unsupported template protocol")
 
     advanced_settings_path = (
         "/root/bindcraft/settings_advanced/"
@@ -177,7 +179,7 @@ def bindcraft(
     elif filter_option == "None":
         filter_settings_path = "/root/bindcraft/settings_filters/no_filters.json"
     else:
-        raise ValueError(f"Unsupported filter type")
+        raise ValueError("Unsupported filter type")
 
     args = {
         "settings": target_settings_path,
@@ -499,9 +501,9 @@ def bindcraft(
                             advanced_settings["optimise_beta"]
                             and float(trajectory_beta) > 15
                         ):
-                            advanced_settings["num_recycles_validation"] = (
-                                advanced_settings["optimise_beta_recycles_valid"]
-                            )
+                            advanced_settings[
+                                "num_recycles_validation"
+                            ] = advanced_settings["optimise_beta_recycles_valid"]
 
                         ### Compile prediction models once for faster prediction of MPNN sequences
                         clear_mem()
@@ -555,21 +557,22 @@ def bindcraft(
                                 )
 
                             ### Predict mpnn redesigned binder complex using masked templates
-                            mpnn_complex_statistics, pass_af2_filters = (
-                                predict_binder_complex(
-                                    complex_prediction_model,
-                                    mpnn_sequence["seq"],
-                                    mpnn_design_name,
-                                    target_settings["starting_pdb"],
-                                    target_settings["chains"],
-                                    length,
-                                    trajectory_pdb,
-                                    prediction_models,
-                                    advanced_settings,
-                                    filters,
-                                    design_paths,
-                                    failure_csv,
-                                )
+                            (
+                                mpnn_complex_statistics,
+                                pass_af2_filters,
+                            ) = predict_binder_complex(
+                                complex_prediction_model,
+                                mpnn_sequence["seq"],
+                                mpnn_design_name,
+                                target_settings["starting_pdb"],
+                                target_settings["chains"],
+                                length,
+                                trajectory_pdb,
+                                prediction_models,
+                                advanced_settings,
+                                filters,
+                                design_paths,
+                                failure_csv,
                             )
 
                             # if AF2 filters are not passed then skip the scoring
@@ -870,7 +873,7 @@ def bindcraft(
                             filter_conditions = check_filters(
                                 mpnn_data, design_labels, filters
                             )
-                            if filter_conditions == True:
+                            if filter_conditions is True:
                                 print(mpnn_design_name + " passed all filters")
                                 accepted_mpnn += 1
                                 accepted_designs += 1

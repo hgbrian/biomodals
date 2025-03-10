@@ -23,7 +23,9 @@ app = App()
 image = (
     Image.debian_slim()
     .apt_install("git")
-    .pip_install("git+https://github.com/HeliXonProtein/OmegaFold.git", force_build=FORCE_BUILD)
+    .pip_install(
+        "git+https://github.com/HeliXonProtein/OmegaFold.git", force_build=FORCE_BUILD
+    )
 )
 
 
@@ -35,11 +37,11 @@ image = (
 )
 def omegafold(input_fasta: str, subbatch_size: int) -> list[tuple[str, bytes]]:
     """Run OmegaFold protein structure prediction.
-    
+
     Parameters:
         input_fasta: Path to input FASTA file containing protein sequence
         subbatch_size: Batch size for model processing
-        
+
     Returns:
         List of tuples containing (file_path, file_content) for generated PDB files
     """
@@ -55,7 +57,8 @@ def omegafold(input_fasta: str, subbatch_size: int) -> list[tuple[str, bytes]]:
     )
 
     return [
-        (pdb_file, open(pdb_file, "rb").read()) for pdb_file in Path(REMOTE_OUT).glob("**/*.pdb")
+        (pdb_file, open(pdb_file, "rb").read())
+        for pdb_file in Path(REMOTE_OUT).glob("**/*.pdb")
     ]
 
 

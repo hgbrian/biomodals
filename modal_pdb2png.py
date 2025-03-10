@@ -126,7 +126,9 @@ def get_orientation_for_ligand(
     structure = parsePDB(pdb_file)
     if isinstance(ligand_id_or_chain, tuple):
         ligand_center = calcCenter(
-            structure.select(f"resname {ligand_id_or_chain[0]} and chain {ligand_id_or_chain[1]}")
+            structure.select(
+                f"resname {ligand_id_or_chain[0]} and chain {ligand_id_or_chain[1]}"
+            )
         )
         nonligand_center = calcCenter(
             structure.select(
@@ -138,13 +140,21 @@ def get_orientation_for_ligand(
         ligand_resname = structure.select(f"resname {ligand_id_or_chain}")
         if ligand_chain is not None:
             ligand_center = calcCenter(structure.select(f"chain {ligand_id_or_chain}"))
-            nonligand_center = calcCenter(structure.select(f"not chain {ligand_id_or_chain}"))
+            nonligand_center = calcCenter(
+                structure.select(f"not chain {ligand_id_or_chain}")
+            )
         elif ligand_resname is not None:
             # ideally arbitrarily pick one chain if there are multiple
-            ligand_center = calcCenter(structure.select(f"resname {ligand_id_or_chain}"))
-            nonligand_center = calcCenter(structure.select(f"not resname {ligand_id_or_chain}"))
+            ligand_center = calcCenter(
+                structure.select(f"resname {ligand_id_or_chain}")
+            )
+            nonligand_center = calcCenter(
+                structure.select(f"not resname {ligand_id_or_chain}")
+            )
         else:
-            raise ValueError(f"Could not find ligand with id or chain {ligand_id_or_chain}")
+            raise ValueError(
+                f"Could not find ligand with id or chain {ligand_id_or_chain}"
+            )
 
     # calculate rotation to orient ligand forward here
     forward_vector = ligand_center - nonligand_center
@@ -197,7 +207,7 @@ def pdb2png(
     png_num_str = ""
 
     for protein_rotate in protein_rotates or [None]:
-        cmd.reinitialize() # move here
+        cmd.reinitialize()  # move here
         cmd.load(in_pdb_file)
 
         if protein_rotate is not None:
@@ -213,7 +223,9 @@ def pdb2png(
                 if ligand_id and ligand_chain
                 else (ligand_id or ligand_chain)
             )
-            _axis, _angle = get_orientation_for_ligand(str(in_pdb_file), ligand_id_or_chain)
+            _axis, _angle = get_orientation_for_ligand(
+                str(in_pdb_file), ligand_id_or_chain
+            )
             cmd.rotate(_axis, _angle)
 
         else:
@@ -244,7 +256,9 @@ def pdb2png(
                 if isinstance(hp_color, tuple):
                     n = 0
                     for chain in cmd.get_chains():
-                        cmd.select(f"sel_{hp_id}_{chain}", f"chain {chain} and {hp_sel}")
+                        cmd.select(
+                            f"sel_{hp_id}_{chain}", f"chain {chain} and {hp_sel}"
+                        )
                         if cmd.count_atoms(f"sel_{hp_id}_{chain}") > 0:
                             cmd.set_color(f"{hp_id}_color_{chain}", hp_color[n : n + 3])
                             cmd.color(f"{hp_id}_color_{chain}", f"sel_{hp_id}_{chain}")
@@ -284,7 +298,9 @@ def pdb2png(
         apply_render_style(render_style)
         cmd.ray(width, height)
 
-        out_png_path = Path(out_dir) / f"{Path(pdb_name).with_suffix('')}{png_num_str}.png"
+        out_png_path = (
+            Path(out_dir) / f"{Path(pdb_name).with_suffix('')}{png_num_str}.png"
+        )
         out_png_path.parent.mkdir(parents=True, exist_ok=True)
         cmd.save(out_png_path, in_pdb_file)
 
@@ -304,7 +320,9 @@ def _parse_rotation_range(rotate_str):
 
     # if there is no range given, then just double up the number
     start_end = [
-        (float(r), float(r)) if "-" not in r else (float(r.split("-")[0]), float(r.split("-")[1]))
+        (float(r), float(r))
+        if "-" not in r
+        else (float(r.split("-")[0]), float(r.split("-")[1]))
         for r in ranges
     ]
 
@@ -331,8 +349,11 @@ def main(
     render_style: str = "default",
     width: int = 1600,
     height: int = 1600,
-    out_dir: str = ".",
+    out_dir: str = "./out/pdb2png",
+    run_name: str = None,
 ):
+    from datetime import datetime
+
     if protein_rotate is not None and "-" in protein_rotate:
         protein_rotates = _parse_rotation_range(protein_rotate)
     elif protein_rotate is not None:
@@ -365,8 +386,11 @@ def main(
         height,
     )
 
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+
     for out_file, out_content in outputs:
-        (Path(out_dir) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)
+        output_path = Path(out_dir) / (run_name or today) / Path(out_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open((Path(out_dir) / Path(out_file)), "wb") as out:
+            with open(output_path, "wb") as out:
                 out.write(out_content)
