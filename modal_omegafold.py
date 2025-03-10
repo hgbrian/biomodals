@@ -15,7 +15,7 @@ LOCAL_IN = "./in/omegafold"
 LOCAL_OUT = "./out/omegafold"
 REMOTE_IN = "/in"
 REMOTE_OUT = LOCAL_OUT
-GPU_SIZE = os.environ.get("MODAL_GPU_SIZE", "80GB")
+GPU_SIZE = os.environ.get("GPU_SIZE", "80GB")
 GPU = modal.gpu.A100(size=GPU_SIZE)
 TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
 app = App()
@@ -33,7 +33,16 @@ image = (
     timeout=60 * TIMEOUT_MINS,
     mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
-def omegafold(input_fasta: str, subbatch_size: int) -> list[str, str]:
+def omegafold(input_fasta: str, subbatch_size: int) -> list[tuple[str, bytes]]:
+    """Run OmegaFold protein structure prediction.
+    
+    Parameters:
+        input_fasta: Path to input FASTA file containing protein sequence
+        subbatch_size: Batch size for model processing
+        
+    Returns:
+        List of tuples containing (file_path, file_content) for generated PDB files
+    """
     input_fasta = Path(input_fasta).relative_to(LOCAL_IN)
     assert input_fasta.suffix in (".faa", ".fasta"), f"not a fasta file: {input_fasta}"
 
@@ -51,7 +60,7 @@ def omegafold(input_fasta: str, subbatch_size: int) -> list[str, str]:
 
 
 @app.local_entrypoint()
-def main(input_fasta, subbatch_size: int = 224):
+def main(input_fasta: str, subbatch_size: int = 224):
     outputs = omegafold.remote(input_fasta, subbatch_size)
 
     for out_file, out_content in outputs:

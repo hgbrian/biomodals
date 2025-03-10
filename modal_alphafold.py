@@ -10,8 +10,8 @@ from pathlib import Path
 
 from modal import App, Image, Mount
 
-GPU = os.environ.get("MODAL_GPU", "L40S")
-TIMEOUT = os.environ.get("MODAL_TIMEOUT", 20 * 60)
+GPU = os.environ.get("GPU", "L40S")
+TIMEOUT = os.environ.get("TIMEOUT", 20 * 60)
 LOCAL_MSA_DIR = "msas"
 if not Path(LOCAL_MSA_DIR).exists():
     Path(LOCAL_MSA_DIR).mkdir(exist_ok=True)
@@ -215,7 +215,7 @@ def alphafold(
 @app.local_entrypoint()
 def main(
     input_fasta: str,
-    models: str = "1",
+    models: list[int] = None,
     num_recycles: int = 1,
     num_relax: int = 0,
     out_dir: str = ".",
@@ -226,7 +226,10 @@ def main(
     from datetime import datetime
 
     fasta_str = open(input_fasta).read()
-    models = [int(model) for model in models.split(",")]
+    if isinstance(models, str):
+        models = [int(model) for model in models.split(",")]
+    elif models is None:
+        models = [1]
 
     outputs = alphafold.remote(
         fasta_name=Path(input_fasta).name,

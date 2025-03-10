@@ -117,9 +117,9 @@ def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
 
 
 @app.local_entrypoint()
-def main(pdb: str, mol2: str, batch_size: int = 5):
+def main(pdb_file: str, mol2_file: str, batch_size: int = 5):
     pdbs_ligands = [
-        (_pdb.strip(), _mol2.strip()) for _pdb, _mol2 in zip(pdb.split(","), mol2.split(","))
+        (_pdb.strip(), _mol2.strip()) for _pdb, _mol2 in zip(pdb_file.split(","), mol2_file.split(","))
     ]
 
     outputs = run_diffdock.remote(pdbs_ligands, batch_size)

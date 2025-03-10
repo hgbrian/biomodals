@@ -36,11 +36,12 @@ app = App("anarci", image=image)
     timeout=60 * 15,
     mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
-def anarci(input_fasta: str, params: str = None) -> list[str, str]:
+def anarci(input_fasta: str, params: str = None) -> list[tuple[str, bytes]]:
     Path(REMOTE_OUT).mkdir(parents=True, exist_ok=True)
 
     if (Path(LOCAL_IN) / input_fasta).exists():
-        assert input_fasta.suffix in (".faa", ".fasta"), f"not a fasta file: {v}"
+        input_path = Path(input_fasta)
+        assert input_path.suffix in (".faa", ".fasta"), f"not a fasta file: {input_fasta}"
         input = Path(REMOTE_IN) / Path(input_fasta).relative_to(LOCAL_IN)
         output = Path(REMOTE_OUT) / Path(input_fasta).stem
     else:
