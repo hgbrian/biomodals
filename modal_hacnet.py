@@ -1,12 +1,12 @@
 from pathlib import Path
 from datetime import datetime
 
-from modal import Image, Mount, Stub
+from modal import Image, Mount, App
 
 MODAL_IN = "./modal_in/hacnet"
 MODAL_OUT = "./modal_out/hacnet"
 
-stub = Stub()
+app = App("hacnet")
 
 image = (Image
          .micromamba(python_version="3.10")
@@ -20,7 +20,7 @@ image = (Image
          .run_commands("mkdir /content")
         )
 
-@stub.function(image=image, gpu="T4", timeout=60*15,
+@app.function(image=image, gpu="T4", timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
 def run_hacnet(pdbs_ligands:list, verbose=False) -> dict:
     from HACNet.functions import predict_pkd
@@ -47,7 +47,7 @@ def run_hacnet(pdbs_ligands:list, verbose=False) -> dict:
 
     return pkds
 
-@stub.local_entrypoint()
+@app.local_entrypoint()
 def main(pdb:str, mol2:str, all_by_all:bool=False):
     if all_by_all:
         pdbs_ligands = [(_pdb.strip(), _mol2.strip()) for _pdb in pdb.split(",") for _mol2 in mol2.split(",") ]
