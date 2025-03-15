@@ -8,42 +8,29 @@ https://colab.research.google.com/drive/1LHEbFMxMTGblSFmv83JBgH7I4TJt8E6M
 Notes from the original colab:
 
 # AfDesign - peptide binder design
-For a given protein target and protein binder length, generate/hallucinate a protein binder 
-sequence AlphaFold thinks will bind to the target structure. 
+For a given protein target and protein binder length, generate/hallucinate a protein binder
+sequence AlphaFold thinks will bind to the target structure.
 To do this, we maximize number of contacts at the interface and maximize pLDDT of the binder.
 
 **WARNING**
 1.   This notebook is in active development and was designed for demonstration purposes only.
-2.   Using AfDesign as the only "loss" function for design might be a bad idea, you may find 
+2.   Using AfDesign as the only "loss" function for design might be a bad idea, you may find
      adversarial sequences (aka. sequences that trick AlphaFold).
 
 Example:
 ```
-modal run modal_afdesign.py --target-chain C --pdb in/afdesign/ABC1.pdb
+modal run modal_afdesign.py --target-chain C --pdb in/afdesign/1igy.pdb
 ```
 """
 
 import re
 import subprocess
+from subprocess import run
 import tempfile
 import warnings
 
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-
-import numpy as np
-
-from utils.pdb_utils import get_pdb
-
-from Bio.PDB import PDBParser, PDBIO, Select
-from Bio.PDB.Polypeptide import is_aa
-from Bio.PDB.NeighborSearch import NeighborSearch
-from scipy.special import softmax
-
-from colabdesign import mk_afdesign_model, clear_mem
-from colabdesign.shared.utils import copy_dict
-from colabdesign.af.alphafold.common import residue_constants
-import plotly.express as px
 
 from modal import Image, Mount, App
 
@@ -55,21 +42,18 @@ DATA_DIR = "/"
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-app = App()
 image = (
-    Image.debian_slim()
+    Image.micromamba()
     .apt_install("git", "wget", "aria2", "ffmpeg")
-    .pip_install(
-        "jax[cuda12_pip]",
-        find_links="https://storage.googleapis.com/jax-releases/jax_cuda_releases.html",
-    )
     .pip_install(
         "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
     )
-    .pip_install("git+https://github.com/sokrypton/ColabDesign.git@v1.1.1")
+    .pip_install(
+        "git+https://github.com/sokrypton/ColabDesign.git@v1.1.2", "jax[cuda12_pip]"
+    )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
-        "mkdir /params"
+        "mkdir /params"  # not sure which
     )
     .run_commands(
         "aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
@@ -77,6 +61,17 @@ image = (
     )
     .pip_install("matplotlib==3.8.1")
 )
+
+with image.imports():
+    import numpy as np
+
+    from Bio.PDB import PDBParser, PDBIO, Select
+    from Bio.PDB.Polypeptide import is_aa
+    from Bio.PDB.NeighborSearch import NeighborSearch
+    from scipy.special import softmax
+
+
+app = App("afdesign", image=image)
 
 
 # ------------------------------------------------------------------------------
@@ -195,6 +190,56 @@ def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
     return nearby_residues
 
 
+def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir="."):
+    """Get a PDB file by code or by filename.
+    Downloads to the current directory."""
+    ALPHAFOLD_VERSION = "v4"
+
+    if biological_assembly is True and pdb_redo is True:
+        raise AssertionError("Biological assembly is not available for pdb-redo files")
+
+    if Path(pdb_code_or_file).is_file():
+        out_path = Path(pdb_code_or_file).resolve()
+    elif len(pdb_code_or_file) == 4:
+        if pdb_redo:
+            pdb_name = f"{pdb_code_or_file}_final.pdb"
+            out_path = Path(out_dir) / Path(pdb_name)
+            run(
+                f"wget -qnc https://pdb-redo.eu/db/{pdb_code_or_file}/{pdb_name} -O {out_path}",
+                shell=True,
+                check=True,
+            )
+        else:
+            pdb_name = f"{pdb_code_or_file}.pdb{'1' if biological_assembly else ''}"
+            out_path = Path(out_dir) / Path(pdb_name)
+            run(
+                f"wget -qnc https://files.rcsb.org/view/{pdb_name} -O {out_path}",
+                shell=True,
+                check=True,
+            )
+    else:
+        pdb_name = f"AF-{pdb_code_or_file}-F1-model_{ALPHAFOLD_VERSION}.pdb"
+        out_path = Path(out_dir) / Path(pdb_name)
+        run(
+            f"wget -qnc https://alphafold.ebi.ac.uk/files/{pdb_name} -O {out_path}",
+            shell=True,
+            check=True,
+        )
+
+    if not out_path.is_file():
+        raise FileNotFoundError(
+            f"{pdb_code_or_file} PDB file {out_path} does not exist"
+        )
+
+    if out_path.stat().st_size < 1000:
+        raise AssertionError(
+            f"{pdb_code_or_file} PDB file {out_path} is too small, something went wrong, e.g., "
+            "pdb-redo will refuse poor quality pdbs"
+        )
+
+    return str(out_path)
+
+
 # ------------------------------------------------------------------------------
 # prep inputs
 #
@@ -244,6 +289,11 @@ def afdesign(
     hard_iters: number of iterations for hard optimization
 
     """
+
+    from colabdesign import mk_afdesign_model, clear_mem
+    from colabdesign.shared.utils import copy_dict
+    from colabdesign.af.alphafold.common import residue_constants
+    import plotly.express as px
 
     merge_chains = None
     if len(target_chain) > 1:
