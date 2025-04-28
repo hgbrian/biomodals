@@ -31,6 +31,7 @@ modal run modal_rfdiffusion.py --pdb 1A00 --contigs "A,B:20"
 """
 
 import glob
+import os
 
 from subprocess import run
 from pathlib import Path
@@ -40,6 +41,7 @@ from modal import Image, Mount, App
 MODAL_IN = "./in/rfdiffusion"
 MODAL_OUT = "./out"
 OUTPUT_ROOT = "rfdiffusion"
+GPU = os.environ.get("MODAL_GPU", "A10G")
 
 app = App()
 
@@ -405,7 +407,7 @@ def designability_test(contigs, path, copies, num_designs,
     run(["python", "colabdesign/rf/designability_test.py", opts], check=True)
 
 
-@app.function(image=image, gpu="T4", timeout=60*15,
+@app.function(image=image, gpu=GPU, timeout=60*15,
                mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
 def rfdiffusion(contigs:str, pdb:str,
                 iterations:int=25,
