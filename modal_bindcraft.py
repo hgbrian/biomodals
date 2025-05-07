@@ -13,8 +13,9 @@ from pathlib import Path
 
 from modal import App, Image
 
-GPU = os.environ.get("GPU", "A10G")
-TIMEOUT = int(os.environ.get("TIMEOUT", 720))
+# It is harder to provision A100s if you set the timeout too high
+GPU = os.environ.get("GPU", "A100")
+TIMEOUT = int(os.environ.get("TIMEOUT", 300))
 print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
 
@@ -72,6 +73,7 @@ def bindcraft(
     interface_protocol="AlphaFold2",
     template_protocol="Default",
     filter_option="Default",
+    max_trajectories: int | None = None,
 ):
     import json
     import os
@@ -202,6 +204,12 @@ def bindcraft(
         settings_path, filters_path, advanced_path
     )
 
+    print("target_settings", target_settings)
+    print("advanced_settings", advanced_settings)
+    print("filters", filters)
+    if max_trajectories is not None:
+        advanced_settings["max_trajectories"] = max_trajectories
+
     settings_file = os.path.basename(settings_path).split(".")[0]
     filters_file = os.path.basename(filters_path).split(".")[0]
     advanced_file = os.path.basename(advanced_path).split(".")[0]
@@ -268,6 +276,7 @@ def bindcraft(
             break
 
         ### check if we reached maximum allowed trajectories
+        # set advanced_settings["max_trajectories"]
         max_trajectories_reached = check_n_trajectories(design_paths, advanced_settings)
 
         if max_trajectories_reached:
@@ -1014,7 +1023,7 @@ def bindcraft(
     ]
 
     for f in os.listdir(design_paths["Accepted/Ranked"]):
-        os.remove(os.path.join(design_paths["Accepted/Ranked"], f))
+        os.remove(os.path.join(design_paths["Accepted/Ranked"], str(f)))
 
     # load dataframe of designed binders
     design_df = pd.read_csv(mpnn_csv)
@@ -1060,16 +1069,19 @@ def bindcraft(
 @app.local_entrypoint()
 def main(
     input_pdb: str,
-    chains: str = "A",
+    target_chains: str = "A",
     target_hotspot_residues: str = "",
-    lengths: str = "40,100",
+    lengths: str = "50,130",
     number_of_final_designs: int = 1,
-    binder_name: str = None,
+    max_trajectories: int | None = None,
+    binder_name: str | None = None,
     out_dir: str = "./out/bindcraft",
-    run_name: str = None,
+    run_name: str | None = None,
 ):
     """
-    target_hotspot_residues: What positions to target in your protein of interest? For example 1,2-10 or chain specific A1-10,B1-20 or entire chains A. If left blank, an appropriate site will be selected by the pipeline.
+    target_hotspot_residues: What positions to target in your protein of interest?
+    For example 1,2-10 or chain specific A1-10,B1-20 or entire chains A.
+    If left blank, an appropriate site will be selected by the pipeline.
     """
     from datetime import datetime
 
@@ -1078,16 +1090,17 @@ def main(
     pdb_str = open(input_pdb).read()
     binder_name = binder_name or Path(input_pdb).stem
     design_path = f"/tmp/BindCraft/{binder_name}/"
-    lengths = [int(i) for i in lengths.split(",")]
+    lengths_list = [int(i) for i in lengths.split(",")]
 
     outputs = bindcraft.remote(
         design_path=design_path,
         binder_name=binder_name,
         pdb_str=pdb_str,
-        chains=chains,
+        chains=target_chains,
         target_hotspot_residues=target_hotspot_residues,
-        lengths=lengths,
+        lengths=lengths_list,
         number_of_final_designs=number_of_final_designs,
+        max_trajectories=max_trajectories,
     )
 
     for out_file, out_content in outputs:
