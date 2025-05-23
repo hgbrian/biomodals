@@ -1,5 +1,6 @@
-"""
-adapting
+"""Runs the BindCraft protein binder design pipeline on Modal.
+
+Adapting:
 https://colab.research.google.com/github/martinpacesa/BindCraft/blob/main/notebooks/BindCraft.ipynb
 
 Approximate cost for 3 designs, PDL1.pdb only:
@@ -20,6 +21,14 @@ print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
 
 def set_up_pyrosetta():
+    """Installs PyRosetta using pyrosettacolabsetup.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     import pyrosettacolabsetup
 
     pyrosettacolabsetup.install_pyrosetta(
@@ -75,6 +84,26 @@ def bindcraft(
     filter_option="Default",
     max_trajectories: int | None = None,
 ):
+    """Executes the BindCraft pipeline to design protein binders against a target structure.
+
+    Args:
+        design_path (str): Path for design outputs within the container.
+        binder_name (str): Name for the binder design project.
+        pdb_str (str): PDB file content as a string.
+        chains (str): Target chain(s) in the PDB.
+        target_hotspot_residues (str): Hotspot residues on the target.
+        lengths (list[int]): Range of lengths for the binder.
+        number_of_final_designs (int): Desired number of final designs.
+        design_protocol (str): Design protocol to use (e.g., "Default", "Beta-sheet").
+        interface_protocol (str): Interface protocol (e.g., "AlphaFold2", "MPNN").
+        template_protocol (str): Template protocol (e.g., "Default", "Masked").
+        filter_option (str): Filter settings to apply (e.g., "Default", "Peptide").
+        max_trajectories (int | None): Maximum number of design trajectories to run.
+
+    Returns:
+        list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative output
+                                  file path from `design_path` and its byte content.
+    """
     import json
     import os
     import shutil
@@ -1078,10 +1107,29 @@ def main(
     out_dir: str = "./out/bindcraft",
     run_name: str | None = None,
 ):
-    """
-    target_hotspot_residues: What positions to target in your protein of interest?
-    For example 1,2-10 or chain specific A1-10,B1-20 or entire chains A.
-    If left blank, an appropriate site will be selected by the pipeline.
+    """Local entrypoint to run BindCraft binder design.
+
+    Args:
+        input_pdb (str): Path to the input PDB file.
+        target_chains (str, optional): Target chain(s) in the PDB. Defaults to "A".
+        target_hotspot_residues (str, optional): Hotspot residues on the target.
+            For example "1,2-10" or chain specific "A1-10,B1-20" or entire chains "A".
+            If left blank, an appropriate site will be selected by the pipeline.
+            Defaults to "".
+        lengths (str, optional): Comma-separated string defining the range of lengths for the binder
+                                 (e.g., "50,130"). Defaults to "50,130".
+        number_of_final_designs (int, optional): Desired number of final designs. Defaults to 1.
+        max_trajectories (int | None, optional): Maximum number of design trajectories to run.
+                                                 Defaults to None.
+        binder_name (str | None, optional): Name for the binder design project. If None, it's derived
+                                            from the input PDB filename. Defaults to None.
+        out_dir (str, optional): Directory to save the output files. Defaults to "./out/bindcraft".
+        run_name (str | None, optional): Optional name for the run, used to create a subdirectory
+                                         in `out_dir`. If None, a timestamp-based name is used.
+                                         Defaults to None.
+
+    Returns:
+        None
     """
     from datetime import datetime
 

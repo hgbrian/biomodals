@@ -1,5 +1,6 @@
-"""
-Boltz-1x https://github.com/jwohlwend/boltz
+"""Runs Boltz-1x for protein structure and complex prediction on Modal.
+
+Boltz-1x: https://github.com/jwohlwend/boltz
 
 ## Example input, test_boltz.yaml:
 ```
@@ -49,7 +50,14 @@ DEFAULT_PARAMS = "--use_msa_server --seed 42"
 
 
 def download_model():
-    """Force download of the Boltz-1 model by running it once"""
+    """Forces download of the Boltz-1 model by running it once.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     from subprocess import run
 
     if not Path(f"/{BOLTZ_VOLUME_NAME}/boltz1_conf.ckpt").exists():
@@ -106,7 +114,14 @@ app = App("boltz", image=image)
 
 
 def fasta_iter(fasta_name):
-    """yield stripped seq_ids and seqs"""
+    """Yields stripped sequence IDs and sequences from a FASTA file.
+
+    Args:
+        fasta_name (str): Path to the FASTA file.
+
+    Yields:
+        tuple[str, str]: Tuples of (sequence_id, sequence).
+    """
     from itertools import groupby
 
     with open(fasta_name) as fh:
@@ -118,10 +133,18 @@ def fasta_iter(fasta_name):
 
 
 def _fasta_to_yaml(input_faa: str) -> str:
-    """Convert Boltz FASTA to Boltz YAML format.
+    """Converts Boltz FASTA to Boltz YAML format.
 
-    Only basic protein, rna, dna supported for now.
-    Just use yaml if you want real flexibility.
+    Note: Only basic protein, rna, dna supported for now. Use YAML directly for more complex inputs.
+
+    Args:
+        input_faa (str): Path to the input FASTA file.
+
+    Returns:
+        str: A string containing the YAML representation of the FASTA content.
+
+    Raises:
+        NotImplementedError: If more than 26 chains are present or unsupported entity types/MSA are encountered.
     """
     import re
     import yaml
@@ -164,8 +187,18 @@ def _fasta_to_yaml(input_faa: str) -> str:
     volumes={f"/{BOLTZ_VOLUME_NAME}": BOLTZ_MODEL_VOLUME},
 )
 def boltz(input_str: str, params_str: str | None = None) -> list:
-    """Runs Boltz on a yaml or fasta.
-    File can contain protein, DNA, RNA, smiles, ccd.
+    """Runs Boltz on a YAML or FASTA input string.
+
+    The input can describe proteins, DNA, RNA, SMILES strings, or CCD identifiers.
+
+    Args:
+        input_str (str): Input content as a string, can be in FASTA or Boltz YAML format.
+        params_str (str | None): Optional string of additional parameters to pass to the
+                                 `boltz predict` command. Defaults to `DEFAULT_PARAMS`.
+
+    Returns:
+        list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative
+                                  output file path and its byte content.
     """
     from subprocess import run
     from tempfile import TemporaryDirectory
@@ -205,6 +238,22 @@ def main(
     run_name: str | None = None,
     out_dir: str = "./out/boltz",
 ):
+    """Local entrypoint to run Boltz predictions using Modal.
+
+    Args:
+        input_faa (str | None): Path to an input FASTA file.
+        input_yaml (str | None): Path to an input Boltz YAML file.
+        params_str (str | None): Optional string of additional parameters for the `boltz predict` command.
+        run_name (str | None): Optional name for the run, used for organizing output files.
+                               If None, a timestamp-based name is used.
+        out_dir (str): Directory to save the output files. Defaults to "./out/boltz".
+
+    Returns:
+        None
+
+    Raises:
+        AssertionError: If neither `input_faa` nor `input_yaml` is provided.
+    """
     from datetime import datetime
 
     # New: Check that at least one input is provided

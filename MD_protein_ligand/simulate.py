@@ -1,5 +1,13 @@
-"""
-Simple protein-ligand simulation using openmm
+"""Performs protein-ligand molecular dynamics simulations using OpenMM.
+
+This module provides functionalities for:
+- Preparing protein and ligand molecules for simulation.
+- Running simulations with explicit or implicit solvent.
+- Analyzing trajectories for RMSD and binding affinity.
+- Handling PDB file fixing, ligand extraction, and decoy generation.
+- Interfacing with external tools like Gnina and OpenBabel for scoring and file conversion.
+
+Key dependencies include OpenMM, RDKit, MDTraj, PDBFixer, and OpenFF Toolkit.
 """
 
 import json
@@ -65,8 +73,21 @@ OPENMM_DEFAULT_LIGAND_ID = "UNK"
 
 
 def _download_binary_if_missing(binary_name:str):
+    """Downloads a binary if it's not found locally.
+
+    Args:
+        binary_name (str): The name of the binary to check and download (e.g., "gnina").
+    """
     def _download(path, url):
-        """download binary"""
+        """Helper function to download a file from a URL.
+
+        Args:
+            path (str): The local path to save the downloaded file.
+            url (str): The URL to download the file from.
+
+        Returns:
+            bool: True if download was successful.
+        """
         print(f"Downloading {binary_name} binary (300Mb for gnina)")
         with requests.get(url, timeout=600, stream=True) as r:
             r.raise_for_status()
@@ -85,7 +106,11 @@ _download_binary_if_missing(GNINA)
 
 
 def get_platform():
-    """Check whether we have a GPU platform and if so set the precision to mixed"""
+    """Checks whether a GPU platform is available and sets precision to mixed if so.
+
+    Returns:
+        openmm.Platform: The fastest available OpenMM platform, configured for mixed precision if GPU.
+    """
 
     platform = max((Platform.getPlatform(i) for i in range(Platform.getNumPlatforms())),
                     key=lambda p: p.getSpeed())
@@ -100,27 +125,25 @@ def get_platform():
 def prepare_protein(in_pdb_file:str, out_pdb_file:str, minimize_pdb:bool=False,
                     mutations:list|None=None) -> bool:
     """
-    Prepare a protein for simulation using pdbfixer and optionally minimize it using openmm.
+    Prepare a protein for simulation using PDBFixer and optionally minimize it using OpenMM.
 
-    This function fixes common issues in PDB files and prepares them for simulation.
-    It identifies missing residues, atoms, non-standard residues and heterogens, then fixes these issues.
-    It also adds missing hydrogens according to the specified pH value.
-    If the 'minimize_pdb' flag is set, the function additionally minimizes the energy of the
-    system using a Langevin integrator.
+    This function fixes common issues in PDB files (missing residues, atoms, non-standard residues)
+    and prepares them for simulation. It adds missing hydrogens according to PDB_PH.
+    If `minimize_pdb` is True, it also minimizes the protein's energy.
 
-    Parameters:
-    in_pdb_file (str): Path to the input PDB file.
-    out_pdb_file (str): Path to the output PDB file where the prepared protein will be saved.
-    minimize_pdb (bool, optional): A flag indicating whether to minimize the PDB file using openmm.
-        If it's a crystal from PDB, then you would not want to minimize it.
-        If it's a docked pose, then you may want to minimize it. Defaults to False.
-    mutation (tuple, optional): A mutation to apply to the protein. Defaults to None.
-        Format is (from_aa, resn, to_aa, chains).
+    Args:
+        in_pdb_file (str): Path to the input PDB file.
+        out_pdb_file (str): Path to the output PDB file where the prepared protein will be saved.
+        minimize_pdb (bool, optional): If True, minimize the PDB structure using OpenMM.
+            Useful for docked poses, less so for crystal structures. Defaults to False.
+        mutations (list[str] | None, optional): A list of mutations to apply. Each mutation
+            is a string like "ALA-10-GLY-A" (OldAA-ResID-NewAA-ChainID). Defaults to None.
+
     Returns:
-    bool: True if the function executes successfully, raises an exception otherwise.
+        bool: True if the function executes successfully. (Note: actual error handling might involve exceptions).
 
     Warnings:
-    This function issues a warning if DMSO is found in the PDB file, suggesting manual removal.
+        Issues a warning if DMSO is found in the PDB file, suggesting manual removal.
     """
 
     fixer = PDBFixer(filename=in_pdb_file)
@@ -178,22 +201,29 @@ def get_pdb_and_extract_ligand(pdb_id:str,
                                minimize_pdb:bool=False,
                                mutations:list|None=None) -> dict:
     """
-    Download a PDB file, prepare it for MD, and extract a ligand.
+    Downloads a PDB file, prepares it for MD, and extracts a specified ligand.
 
-    This function downloads a PDB file, prepares it to a {pdb_id}_fixed.pdb file,
-    then extracts one ligand and saves it as {pdb_id}_{ligand_id}.sdf and {pdb_id}_{ligand_id}.smi
+    This function fetches a PDB file (either from RCSB or PDB-REDO), prepares the protein
+    structure using `prepare_protein`, and then extracts a specified ligand into SDF and SMILES format.
 
-    Parameters:
-    pdb_id (str): The 4-letter PDB ID.
-    ligand_id (str): The 3-letter ligand ID.
-    ligand_chain (str): If you want to specify the chain of the ligand. Defaults to None.
-    out_dir (str): The output directory. Defaults to '.'.
-    use_pdb_redo (bool): If True, use get pdb_redo PDB ({pdb_id}_pdbredo.pdb). Defaults to False.
-    minimize_pdb (bool): If True, minimize the PDB file. Defaults to False.
-    remove_H_from_ligand (bool): If True, remove hydrogens from the ligand. Defaults to True.
+    Args:
+        pdb_id (str): The 4-letter PDB ID or path to a local PDB file.
+        ligand_id (str | None, optional): The 3-letter ID of the ligand to extract. If None,
+            only protein preparation is performed. Defaults to None.
+        ligand_chain (str | None, optional): The chain ID of the ligand. Defaults to None.
+        out_dir (str, optional): The directory to save output files. Defaults to '.'.
+        use_pdb_redo (bool, optional): If True, download from PDB-REDO instead of RCSB.
+            Defaults to False.
+        minimize_pdb (bool, optional): If True, minimize the protein structure during preparation.
+            Defaults to False.
+        mutations (list[str] | None, optional): A list of mutations to apply during protein
+            preparation (passed to `prepare_protein`). Defaults to None.
 
     Returns:
-    filename_dict (dict): a dict of the files produced
+        dict: A dictionary containing paths to the generated files.
+            Expected keys: "original_pdb" (str), "pdb" (str, path to prepared protein PDB),
+            "sdf" (str, path to ligand SDF, if `ligand_id` is provided),
+            "smi" (str, SMILES string of the ligand, if `ligand_id` is provided).
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
@@ -228,10 +258,24 @@ def get_pdb_and_extract_ligand(pdb_id:str,
 
 
 def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
-    """
-    Given a reference (rdkit) molecule and a decoy SMILES,
-    generate a decoy molecule (both rdkit and openff) and its closest conformer
-    to the reference molecule in terms of Tanimoto shape distance.
+    Generates a 3D conformer for a decoy molecule that best matches a reference molecule.
+
+    The decoy molecule is generated from a SMILES string, and multiple conformers are
+    generated. The conformer with the smallest Tanimoto shape distance to the
+    reference molecule is selected and aligned.
+
+    Args:
+        reference_rmol (rdkit.Chem.rdchem.Mol): The reference RDKit molecule.
+        decoy_smiles (str): SMILES string for the decoy molecule.
+        num_conformers (int, optional): Number of conformers to generate for the decoy.
+            Defaults to 100.
+
+    Returns:
+        tuple[rdkit.Chem.rdchem.Mol, openff.toolkit.topology.Molecule, openff.toolkit.topology.Molecule.conformers]:
+            A tuple containing:
+            - The RDKit decoy molecule with the best conformer selected.
+            - The OpenFF decoy molecule.
+            - The coordinates of the best conformer.
     """
 
     # Convert SMILES to 3D structure
@@ -270,19 +314,21 @@ def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
 
 def prepare_ligand_for_MD(mol_filename:str, is_sanitize:bool=True):
     """
-    Prepare a ligand for Molecular Dynamics (MD) simulation.
+    Prepares a ligand from a file for Molecular Dynamics (MD) simulation.
 
-    This function reads an sdf or mol2 file into RDKit, adds Hydrogens (Hs) to the molecule,
-    ensures all chiral centers are defined, and then creates an openff Molecule object.
+    This function reads an SDF or MOL file into RDKit, adds hydrogens,
+    assigns chiral tags, and then converts it to an OpenFF Molecule object.
 
-    Parameters:
-    mol_filename (str): Path to the sdf or mol file to read.
-    is_sanitize (bool): Some SDFs are not sanitizable, which is a problem for OpenMM. Defaults to True.
+    Args:
+        mol_filename (str): Path to the SDF or MOL file to read.
+        is_sanitize (bool, optional): Whether to sanitize the molecule in RDKit.
+            Some SDFs may not be sanitizable, which can be an issue for OpenMM.
+            Defaults to True.
 
     Returns:
-    tuple: A tuple containing:
-        - rdkit.Chem.rdchem.Mol: The RDKit molecule object with Hydrogens added.
-        - openff.toolkit.topology.Molecule: The openforcefield Molecule object created from RDKit molecule.
+        tuple[rdkit.Chem.rdchem.Mol, openff.toolkit.topology.Molecule]: A tuple containing:
+            - The RDKit molecule object (with hydrogens).
+            - The OpenFF Molecule object created from the RDKit molecule.
     """
     ligand_rmol = Chem.MolFromMolFile(mol_filename, sanitize=is_sanitize)
     ligand_rmol = Chem.AddHs(ligand_rmol, addCoords=True)
@@ -294,20 +340,20 @@ def prepare_ligand_for_MD(mol_filename:str, is_sanitize:bool=True):
 
 def prepare_system_generator(ligand_mol=None, use_solvent=False):
     """
-    Prepare a system generator object for MD simulation.
+    Prepares an OpenMM SystemGenerator object for MD simulation.
 
-    This function initializes a SystemGenerator object either with or without solvent,
-    depending on the 'use_solvent' flag. The forcefield for the small molecule is always set to 'gaff-2.11'.
+    This function initializes a SystemGenerator with appropriate force fields
+    for protein and optionally a small molecule ligand and solvent.
 
-    Parameters:
-    ligand_mol (openforcefield.topology.Molecule, optional): The ligand molecule to include in the system generator.
-        Defaults to None.
-    use_solvent (bool, optional): A flag indicating whether to include solvent in the system generator.
-        If True, the forcefields list includes both the protein and solvent forcefields.
-        If False, only the protein forcefield is included. Defaults to False.
+    Args:
+        ligand_mol (openff.toolkit.topology.Molecule | None, optional): The OpenFF ligand
+            molecule to include in the system. Defaults to None.
+        use_solvent (bool, optional): If True, configure the system for explicit solvent
+            (e.g., TIP3P water). If False, implicit solvent (OBC2) is used.
+            Defaults to False.
 
     Returns:
-    openmmforcefields.generators.SystemGenerator: The prepared system generator.
+        openmmforcefields.generators.SystemGenerator: The configured SystemGenerator object.
     """
 
     # FIXFIX why is `molecules` not passed for use_solvent=False in tdudgeon/simulateComplex.py?
@@ -323,25 +369,28 @@ def prepare_system_generator(ligand_mol=None, use_solvent=False):
 
 
 def analyze_traj(traj_dcd: str, topol_in:str, output_traj_analysis:str,
-                 ligand_chain_id="1", backbone_chain_id="0") -> pd.DataFrame:
-    """
-    Analyze trajectory for RMSD of backbone and ligand using mdtraj.
+                 ligand_chain_id: str = "1", backbone_chain_id: str = "0") -> pd.DataFrame:
+    """Analyzes a trajectory for RMSD of backbone and ligand using MDTraj.
 
-    This function calculates the RMSD (root mean square deviation) for the ligand (assumed to be chainid 1)
-    and the backbone (assumed to be chainid 0) over the course of a trajectory. The resulting data is saved
-    to a tab-separated CSV file.
+    Calculates Root Mean Square Deviation (RMSD) for the ligand and protein backbone
+    over a trajectory. The trajectory is first superimposed on its initial frame.
+    Results are saved to a tab-separated file.
 
-    Warning: This function assumes that the ligand is chainid 1 and the protein is chainid 0.
-
-    Parameters:
-    traj_in (str): Path to the input trajectory file.
-    topol_in (str): Path to the input topology file.
-    output_traj_analysis (str): Path to the output CSV file where the RMSD analysis will be saved.
+    Args:
+        traj_dcd (str): Path to the input DCD trajectory file.
+        topol_in (str): Path to the input topology file (e.g., PDB).
+        output_traj_analysis (str): Path to save the RMSD analysis (tab-separated CSV).
+        ligand_chain_id (str, optional): Chain ID of the ligand in the topology.
+            Defaults to "1".
+        backbone_chain_id (str, optional): Chain ID of the protein backbone in the topology.
+            Defaults to "0".
 
     Returns:
-    pandas.DataFrame: A DataFrame containing the RMSD analysis. Each row represents a time point in the trajectory.
-                      The columns are 'time' (simulation time), 'rmsd_bck' (RMSD of the backbone),
-                      and 'rmsd_lig' (RMSD of the ligand).
+        pandas.DataFrame: A DataFrame with columns 'time' (ps), 'rmsd_bck' (nm), and 'rmsd_lig' (nm).
+
+    Warnings:
+        Assumes ligand is chainid 1 and protein is chainid 0 by default. This might
+        not be universally true depending on PDB file conventions.
     """
 
     traj = md.load(traj_dcd, top=topol_in)
@@ -372,23 +421,24 @@ def analyze_traj(traj_dcd: str, topol_in:str, output_traj_analysis:str,
 
 
 def get_affinity(pdb_in:str, ligand_id:str, convert_to_pdbqt:bool=False,
-                 scoring_tool:str=GNINA) -> float:
-    """
-    Calculates the predicted binding affinity of a molecule to a protein using gnina.
-    The lower the binding affinity, the stronger the expected binding.
+                  scoring_tool: str = GNINA) -> float:
+    """Calculates predicted binding affinity using Gnina or a similar tool.
 
-    Due to a weird intermittent bug in gnina, allow conversion of the
-    PDB file to PDBQT format with obabel. I am still unclear on what's going on here.
+    Extracts protein and ligand from a PDB file, then uses a scoring tool
+    (typically Gnina) to predict binding affinity. Lower scores indicate stronger binding.
+    Optionally converts the protein to PDBQT format using OpenBabel first.
 
-    Parameters:
-    pdb_in (str): The path to the input protein+ligand PDB file.
-    ligand_id (str): The id of the ligand within the PDB file.
-    convert_to_pdbqt (bool): If True, convert the PDB file to PDBQT format before running gnina.
-        Defaults to False.
-    scoring_tool (str): Defaults to 'gnina'.
+    Args:
+        pdb_in (str): Path to the input PDB file containing the protein-ligand complex.
+        ligand_id (str): Residue name (3-letter code) of the ligand within the PDB file.
+        convert_to_pdbqt (bool, optional): If True, convert the protein part to PDBQT
+            format using OpenBabel before scoring. This might handle some Gnina issues.
+            Defaults to False.
+        scoring_tool (str, optional): The command-line tool to use for scoring.
+            Defaults to GNINA (expected to be "./bin/gnina").
 
     Returns:
-    float: The predicted binding affinity of the ligand to the protein.
+        float: The predicted binding affinity (e.g., in kcal/mol).
     """
     gnina_affinity_pattern = r"Affinity:\s*([\-\.\d+]+)"
 
@@ -423,23 +473,19 @@ def get_affinity(pdb_in:str, ligand_id:str, convert_to_pdbqt:bool=False,
 
 
 def extract_pdbs_from_dcd(complex_pdb:str, trajectory_dcd:str) -> dict:
-    """
-    Extracts individual PDB structures from a molecular dynamics trajectory (DCD file)
-    and stores them in a dictionary.
+    """Extracts individual PDB snapshots from a DCD trajectory file.
 
-    This function takes as input a PDB file representing the initial structure of the system,
-    and a DCD file containing the molecular dynamics trajectory. It iterates over the trajectory
-    and writes out individual PDB files for each frame.
+    Uses MDAnalysis to load a trajectory and its corresponding topology (PDB),
+    then writes each frame as a separate PDB file.
 
-    Parameters:
-    complex_pdb : str
-        Path to the initial PDB complex file (output of openmm), the structure of protein + ligand.
-
-    trajectory_dcd : str
-        Path to the DCD file containing the molecular dynamics trajectory.
+    Args:
+        complex_pdb (str): Path to the PDB file corresponding to the topology of the trajectory
+            (e.g., the initial complex PDB from OpenMM).
+        trajectory_dcd (str): Path to the DCD trajectory file.
 
     Returns:
-    dict: keys are simulation time points in picoseconds and values are paths to PDB files.
+        dict[float, str]: A dictionary where keys are simulation time points (in picoseconds)
+            and values are the file paths to the extracted PDB snapshot for that frame.
     """
     universe = mda.Universe(complex_pdb, trajectory_dcd)
 
@@ -455,30 +501,50 @@ def extract_pdbs_from_dcd(complex_pdb:str, trajectory_dcd:str) -> dict:
 
 def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
              use_solvent:bool=False, decoy_smiles:Union[str|None]=None, minimize_only:bool=False,
-             temperature:float=PDB_TEMPERATURE,
-             equilibration_steps:int=200, reporting_interval:Union[int,None]=None,
-             scoring_tool:str=GNINA) -> dict:
-    """
-    Run a molecular dynamics simulation using OpenMM.
+             temperature: float = PDB_TEMPERATURE,
+             equilibration_steps: int = 200, reporting_interval: Union[int, None] = None,
+             scoring_tool: str = GNINA) -> dict:
+    """Runs a molecular dynamics simulation of a protein-ligand complex using OpenMM.
 
-    This function simulates the interactions between a protein (from a PDB file)
-    and a ligand (from a MOL/SDF file).
-    The simulation can be performed in vacuum or in solvent.
-    The simulation outputs are saved in several file formats.
+    This comprehensive function sets up and runs an MD simulation. It can handle:
+    - Simulation in implicit or explicit solvent.
+    - Use of a provided ligand or generation of a decoy.
+    - Minimization-only runs or full MD simulations with equilibration.
+    - Calculation of binding affinities before and after minimization, and along the trajectory.
+    - Trajectory analysis for RMSD.
 
-    Parameters:
-    pdb_in (str): Path to the input PDB file containing the protein structure.
-    mol_in (str): Path to the input MOL/SDF file containing the ligand structure.
-    output (str): The prefix of the output file names.
-    num_steps (int): The number of simulation steps to be performed.
-    use_solvent (bool): If True, the simulation is performed in solvent. If False, it is performed in vacuum.
-    decoy_smiles (str): The SMILES string of a decoy ligand. If not None, the decoy is used instead of the input ligand.
-    temperature (float): The simulation temperature in Kelvin.
-    equilibration_steps (int): The number of steps for the equilibration phase of the simulation.
-    reporting_interval (int): The interval (in steps) at which the simulation data is recorded. Leave as None to get a number based on num_steps.
+    Args:
+        pdb_in (str): Path to the input PDB file for the protein.
+        mol_in (str | None): Path to the input MOL/SDF file for the ligand. Can be None if `decoy_smiles` is provided.
+        output (str): Prefix for all output file names (e.g., "sim_output/run1").
+        num_steps (int): Number of simulation steps to perform after equilibration.
+        use_solvent (bool, optional): If True, run with explicit solvent (TIP3P).
+            If False, use implicit solvent (OBC2). Defaults to False.
+        decoy_smiles (str | None, optional): SMILES string for a decoy ligand. If provided,
+            `mol_in` might be used as a reference for generating the decoy's initial conformer.
+            Defaults to None.
+        minimize_only (bool, optional): If True, only perform energy minimization and stop.
+            No MD steps will be run. Defaults to False.
+        temperature (float, optional): Simulation temperature in Kelvin.
+            Defaults to `PDB_TEMPERATURE` (300 K).
+        equilibration_steps (int, optional): Number of equilibration steps before the main simulation.
+            Defaults to 200.
+        reporting_interval (int | None, optional): Interval (in steps) for writing trajectory frames
+            and state data. If None, a reasonable default is chosen based on `num_steps`.
+            Defaults to None.
+        scoring_tool (str, optional): Command-line tool for binding affinity calculation (e.g., Gnina).
+            Defaults to `GNINA`.
 
     Returns:
-    pandas.DataFrame: A DataFrame containing the RMSD analysis of the trajectory.
+        dict: A dictionary containing paths to the major output files, such as:
+            "complex_pdb" (str): Path to the PDB of the initial protein-ligand complex.
+            "minimized_pdb" (str): Path to the PDB of the minimized complex.
+            "affinity_tsv" (str): Path to a TSV file with binding affinities.
+            "args_json" (str): Path to a JSON file saving the input arguments.
+            If `minimize_only` is False, it also includes:
+            "traj_dcd" (str): Path to the DCD trajectory file.
+            "state_tsv" (str): Path to a TSV file with simulation state data (energy, temp).
+            "analysis_tsv" (str): Path to a TSV file with RMSD analysis.
     """
 
     os.makedirs(Path(output).parent, exist_ok=True)

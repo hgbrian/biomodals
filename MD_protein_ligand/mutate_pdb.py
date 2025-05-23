@@ -1,5 +1,4 @@
-"""
-Mutate a residue in a pdb file.
+"""Mutate a residue in a pdb file.
 
 Requires pymol, which can be difficult to install:
 !mamba install -c conda-forge pymol-open-source
@@ -17,17 +16,18 @@ AA_MAP_1_3 = {v:k for k, v in AA_MAP_3_1.items()}
 
 
 def mutate_pdb(pdb_file:str, chains:str, res_num:int, aa:str, check_original_aa:str|None=None, rotamer:str|None=None) -> str:
-    """
-    This function mutates a specific residue in a pdb file and saves the modified structure.
+    """Mutates a specific residue in a PDB file and saves the modified structure.
 
-    Parameters:
-    pdb_file (str): The file path to the input pdb file.
-    chains (str): The chains in the pdb file where the mutation should occur.
-    res_num (int): The residue number where the mutation should occur.
-    aa (str): The new amino acid (in three-letter format) to which the residue should be mutated.
+    Args:
+        pdb_file (str): The file path to the input PDB file.
+        chains (str): The chains in the PDB file where the mutation should occur.
+        res_num (int): The residue number where the mutation should occur.
+        aa (str): The new amino acid (3-letter or 1-letter code) to which the residue should be mutated.
+        check_original_aa (str | None): The original amino acid (3-letter or 1-letter code) to verify before mutation. If None, no check is performed.
+        rotamer (str | None): The specific rotamer to apply. If None, PyMOL's default is used. (Expert use only).
 
     Returns:
-    out_file (str): the mutated pdb file following the format: {pdb_file stem}_{chain}_{residue number}{mutated aa}.pdb
+        out_file (str): The mutated PDB file following the format: {pdb_file stem}_{chain}_{original_aa(s)}{residue_number}{mutated_aa}.pdb
     """
     # important!! otherwise pymol holds onto state
     cmd.reinitialize()

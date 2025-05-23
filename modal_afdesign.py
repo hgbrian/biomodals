@@ -1,4 +1,5 @@
-"""
+"""Designs protein binders, including cyclic peptides, using AFDesign on Modal.
+
 Adapting the AFDesign colab for modal
 https://colab.research.google.com/drive/1LHEbFMxMTGblSFmv83JBgH7I4TJt8E6M
 
@@ -78,9 +79,27 @@ app = App("afdesign", image=image)
 # BN added this function
 #
 def add_cyclic_offset(self):
-    """add cyclic offset to connect N and C term head to tail"""
+    """Adds cyclic offset to connect N and C termini head to tail.
+
+    This function modifies the model's internal offset matrix to enforce
+    cyclization in peptide design.
+
+    Args:
+        self (colabdesign.af.model.af_model): The AFDesign model instance.
+
+    Returns:
+        None
+    """
 
     def _cyclic_offset(L):
+        """Calculates the cyclic offset matrix for a given length.
+
+        Args:
+            L (int): The length of the sequence or segment.
+
+        Returns:
+            np.ndarray: The cyclic offset matrix.
+        """
         i = np.arange(L)
         ij = np.stack([i, i + L], -1)
         offset = i[:, None] - i[None, :]
@@ -107,18 +126,45 @@ def add_cyclic_offset(self):
 # BN added this function
 #
 class ResidueRangeSelect(Select):
+    """Bio.PDB.Select class to accept residues within a specific range and chain."""
     def __init__(self, chain_ids, start, end):
+        """Initializes the ResidueRangeSelect class.
+
+        Args:
+            chain_ids (list[str]): List of chain IDs to accept.
+            start (int): Starting residue number to accept.
+            end (int): Ending residue number to accept.
+        """
         self.chain_ids = chain_ids
         self.start = start
         self.end = end
 
     def accept_residue(self, residue):
+        """Accepts a residue if it's within the specified range and chain.
+
+        Args:
+            residue (Bio.PDB.Residue.Residue): The residue to check.
+
+        Returns:
+            bool: True if the residue is accepted, False otherwise.
+        """
         within_range = self.start <= residue.get_id()[1] <= self.end
         correct_chain = residue.parent.id in self.chain_ids
         return within_range and correct_chain
 
 
 def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
+    """Extracts a specific range of residues from specified chains in a PDB file.
+
+    Args:
+        pdb_file (str): Path to the input PDB file.
+        chain_ids (list[str]): List of chain IDs from which to extract residues.
+        start_residue (int): Starting residue number.
+        end_residue (int): Ending residue number.
+
+    Returns:
+        str: Path to a temporary PDB file containing the extracted residues.
+    """
     # create a PDBParser object
     parser = PDBParser()
 
@@ -144,8 +190,18 @@ def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
 # BN added this merging tool
 #
 def join_chains(pdb_file, target_chain, merge_chains):
-    """Use pdb-tools to combine the pdb file into one chain.
-    Probably unnecessary!"""
+    """Uses pdb-tools to combine specified chains in a PDB file into a single chain.
+
+    Note: This might be unnecessary depending on AFDesign's capabilities.
+
+    Args:
+        pdb_file (str): Path to the input PDB file.
+        target_chain (str): The new chain ID for the merged chain.
+        merge_chains (list[str]): List of chain IDs to merge.
+
+    Returns:
+        str: Path to a temporary PDB file with merged chains.
+    """
     with NamedTemporaryFile(suffix=".pdb", delete=False) as tf:
         subprocess.run(
             f"pdb_selchain -{','.join(merge_chains)} {pdb_file} | "
@@ -160,7 +216,16 @@ def join_chains(pdb_file, target_chain, merge_chains):
 # BN added this function
 #
 def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
-    """Report the residues within `distance` of the ligand as a dict."""
+    """Reports the protein residues within a specified distance of a ligand.
+
+    Args:
+        pdb_file (str): Path to the PDB file.
+        ligand_id (str): Residue name of the ligand (e.g., "LG1").
+        distance (float, optional): Distance threshold in Angstroms. Defaults to 8.0.
+
+    Returns:
+        set[Bio.PDB.Residue.Residue]: A set of Biopython Residue objects that are near the ligand.
+    """
     parser = PDBParser()
     structure = parser.get_structure("protein", pdb_file)
 
@@ -191,8 +256,28 @@ def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
 
 
 def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir="."):
-    """Get a PDB file by code or by filename.
-    Downloads to the current directory."""
+    """Fetches a PDB file by code or uses a local filename, downloading if necessary.
+
+    Downloads to `out_dir` (defaults to current directory). Can fetch from RCSB PDB,
+    AlphaFold DB, or PDB-REDO.
+
+    Args:
+        pdb_code_or_file (str): PDB code (e.g., "1XYZ"), UniProt code (e.g., "P00760" for AFDB),
+                                or path to a local PDB file.
+        biological_assembly (bool, optional): If True, attempts to fetch the first biological
+                                             assembly (e.g., "1XYZ.pdb1"). Defaults to False.
+        pdb_redo (bool, optional): If True, attempts to fetch the PDB-REDO version if available.
+                                   Defaults to False.
+        out_dir (str, optional): Directory to download/output the PDB file. Defaults to ".".
+
+    Returns:
+        str: Path to the fetched or validated local PDB file.
+
+    Raises:
+        AssertionError: If `biological_assembly` and `pdb_redo` are both True, or if the
+                        downloaded PDB file is too small (likely indicating an issue).
+        FileNotFoundError: If the PDB file does not exist after attempting to fetch it.
+    """
     ALPHAFOLD_VERSION = "v4"
 
     if biological_assembly is True and pdb_redo is True:
@@ -268,26 +353,39 @@ def afdesign(
     soft_iters: int = 120,
     hard_iters: int = 32,
 ):
-    """
-    pdb: enter PDB code or UniProt code (to fetch AlphaFoldDB model) or leave blink to upload your own
-    target_chain: chain to design binder against
-    target_hotspot: restrict loss to predefined positions on target (eg. "1-10,12,15")
-    target_flexible: allow backbone of target structure to be flexible
+    """Designs protein binders using AFDesign on Modal, with options for cyclic peptides and various optimization strategies.
 
-    binder_len: length of binder to hallucination
-    binder_seq: if defined, will initialize design with this sequence
-    binder_chain: if defined, supervised loss is used (binder_len is ignored).
-                  Set it to the chain of the binder in the PDB file?
+    Args:
+        pdb (str): PDB code, UniProt code (to fetch AlphaFoldDB model), or path to a PDB file.
+        target_chain (str): Chain(s) to design binder against. If multiple chains are provided (e.g., "AB"),
+                            they will be merged into the first character of the string (e.g., "A").
+        target_hotspot (str | None, optional): Restrict loss to predefined positions on target
+                                               (e.g., "1-10,12,15"). Defaults to None.
+        target_flexible (bool, optional): Allow backbone of target structure to be flexible.
+                                          Defaults to True.
+        binder_len (int, optional): Length of the binder to hallucinate. Defaults to 30.
+        binder_seq (str | None, optional): If defined, will initialize design with this sequence.
+                                           Defaults to None.
+        binder_chain (str | None, optional): If defined, supervised loss is used (binder_len is ignored).
+                                             Set it to the chain of the binder in the PDB file.
+                                             Defaults to None.
+        set_fixed_aas (str | None, optional): A string of amino acids of the same length as `binder_len`.
+                                             Positions with specific amino acids will be fixed during design.
+                                             Use 'X' or '-' for positions to be designed. Defaults to None.
+        cyclic_peptide (bool, optional): Enforce cyclic peptide design. Defaults to True.
+        use_multimer (bool, optional): Use alphafold-multimer for design. Defaults to False.
+        num_recycles (int, optional): Number of recycles for the AlphaFold model. Defaults to 3.
+        num_models (int, optional): Number of trained AlphaFold models to use during optimization (1-5).
+                                    Defaults to 2.
+        pdb_redo (bool, optional): If True, attempts to fetch the PDB-REDO version of the input PDB.
+                                 Defaults to True.
+        soft_iters (int, optional): Number of iterations for soft optimization. Defaults to 120.
+        hard_iters (int, optional): Number of iterations for hard optimization. Defaults to 32.
 
-    cyclic_peptide: enforce cyclic peptide
-
-    use_multimer: use alphafold-multimer for design
-    num_recycles: #@param ["0", "1", "3", "6"] {type:"raw"}
-    num_models: number of trained models to use during optimization  #@param ["1", "2", "3", "4", "5", "all"]
-
-    soft_iters: number of iterations for soft optimization
-    hard_iters: number of iterations for hard optimization
-
+    Returns:
+        list[tuple[str, bytes]]: A list of tuples, where each tuple contains an output filename
+                                 (e.g., for the log, HTML animation, PDB structure, sequence profile image)
+                                 and its byte content.
     """
 
     from colabdesign import mk_afdesign_model, clear_mem
@@ -526,7 +624,37 @@ def main(
     hard_iters: int = 6,
     num_parallel: int = 1,
 ):
-    """120 soft iters, 32 hard iters is recommended"""
+    """Local entrypoint to run AFDesign predictions, potentially in parallel.
+
+    Note: 120 soft iterations and 32 hard iterations are generally recommended for good results.
+
+    Args:
+        pdb (str): PDB code, UniProt code, or path to a PDB file.
+        target_chain (str): Chain(s) to design binder against.
+        target_hotspot (str | None, optional): Restrict loss to predefined positions on target.
+                                               Defaults to None.
+        target_flexible (bool, optional): Allow backbone of target structure to be flexible.
+                                          Defaults to True.
+        binder_len (int, optional): Length of the binder. Defaults to 12.
+        binder_seq (str | None, optional): Initial sequence for the binder. Defaults to None.
+        binder_chain (str | None, optional): Chain ID of the binder if using supervised loss.
+                                             Defaults to None.
+        set_fixed_aas (str | None, optional): String to fix amino acids at certain positions in the binder.
+                                             Use 'X' for positions to be designed. Defaults to None.
+        linear_peptide (bool, optional): If True, design a linear peptide instead of a cyclic one.
+                                        Defaults to False (meaning cyclic by default).
+        use_multimer (bool, optional): Use alphafold-multimer. Defaults to False.
+        num_recycles (int, optional): Number of recycles. Defaults to 3.
+        num_models (int, optional): Number of AlphaFold models to use (1-5). Defaults to 2.
+        use_rcsb_pdb (bool, optional): If True, force fetching from RCSB PDB instead of PDB-REDO.
+                                      Defaults to False (meaning PDB-REDO is preferred).
+        soft_iters (int, optional): Number of soft optimization iterations. Defaults to 30.
+        hard_iters (int, optional): Number of hard optimization iterations. Defaults to 6.
+        num_parallel (int, optional): Number of parallel AFDesign runs to execute. Defaults to 1.
+
+    Returns:
+        None
+    """
 
     assert hard_iters >= 2, "fails on hard_iters=1"
 
