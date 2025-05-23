@@ -1,4 +1,4 @@
-"""Run AlphaFold2 / AF2-multimer.
+"""Runs AlphaFold2 or AF2-multimer predictions using ColabFold on Modal.
 
 - It requires only one entry in a fasta file.
 - If providing a complex, e.g., a binder and target pair,
@@ -36,24 +36,24 @@ image = (
 app = App("alphafold", image=image)
 
 
-def score_af2m_binding(af2m_dict: str, target_len: int, binders_len: list[int]) -> dict:
-    """
-    Calculate binding scores from AlphaFold2 multimer prediction results.
-    The binder is assumed to be the first part of the sequence up to `binder_len`,
-    with the target being the remainder, unless otherwise specified.
+def score_af2m_binding(af2m_dict: dict, target_len: int, binders_len: list[int]) -> dict:
+    """Calculates binding scores from AlphaFold2 multimer prediction results.
 
-    Parameters:
-    af_multimer_dict (str): From AlphaFold2 multimer JSON file
-    binder_len (int): Length of the binder protein sequence.
-    target_len (int): Length of the target protein sequence (optional)
+    The target is assumed to be the first part of the sequence, followed by one or more binders.
+
+    Args:
+        af2m_dict (dict): Dictionary loaded from an AlphaFold2 multimer JSON output file (usually contains 'plddt' and 'pae' keys).
+        target_len (int): Length of the target protein sequence.
+        binders_len (list[int]): List of lengths for each binder protein sequence.
 
     Returns:
-    dict: A dictionary containing the following scores:
-        - plddt_binder (float): Average pLDDT score for the binder.
-        - plddt_target (float): Average pLDDT score for the target.
-        - pae_binder (float): Average PAE score within the binder.
-        - pae_target (float): Average PAE score within the target.
-        - ipae (float): Average PAE score for the binder-target interaction.
+        dict: A dictionary containing various scores:
+            - "plddt_binder" (dict[int, float]): Average pLDDT for each binder, keyed by binder index (0-based).
+            - "plddt_target" (float): Average pLDDT for the target.
+            - "pae_binder" (dict[int, float]): Average PAE within each binder, keyed by binder index.
+            - "pae_target" (float): Average PAE within the target.
+            - "ipae" (dict[int, float]): Average interface PAE between the target and each binder, keyed by binder index.
+            - "ipae_binder" (dict[int, list[float]]): Per-residue interface PAE scores for each binder interacting with the target, keyed by binder index.
     """
 
     import numpy as np
@@ -132,6 +132,28 @@ def alphafold(
     use_precomputed_msas: bool = False,
     return_all_files: bool = False,
 ):
+    """Runs AlphaFold2/ColabFold prediction on Modal.
+
+    Args:
+        fasta_name (str): Name of the FASTA file (e.g., "protein.fasta").
+        fasta_str (str): Content of the FASTA file as a string.
+        models (list[int], optional): List of model numbers to run (1-5). Defaults to [1].
+        num_recycles (int, optional): Number of recycles for the model. Defaults to 3.
+        num_relax (int, optional): Number of relaxation steps (0 means no Amber relaxation,
+                                   1 means relax top model). Defaults to 0.
+        use_templates (bool, optional): Whether to use PDB templates during prediction. Defaults to False.
+        use_precomputed_msas (bool, optional): If True, attempts to copy MSAs from a mounted
+                                               directory ("/msas") into the output directory to reuse them.
+                                               Defaults to False.
+        return_all_files (bool, optional): If True, returns all generated files. If False,
+                                           only returns the main ZIP file containing predictions.
+                                           Defaults to False.
+
+    Returns:
+        list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative output
+                                  file path (typically a zip file or specific requested files)
+                                  and its byte content.
+    """
     import json
     import subprocess
     import zipfile
@@ -223,6 +245,28 @@ def main(
     use_precomputed_msas: bool = False,
     return_all_files: bool = False,
 ):
+    """Local entrypoint for running AlphaFold2 predictions.
+
+    This function prepares the inputs, calls the remote `alphafold` Modal function,
+    and saves the output files locally.
+
+    Args:
+        input_fasta (str): Path to the input FASTA file.
+        models (list[int], optional): List of AlphaFold2 model numbers to run (1-5).
+                                      Can be a comma-separated string if passed via CLI.
+                                      Defaults to [1].
+        num_recycles (int, optional): Number of recycles for the model. Defaults to 1.
+        num_relax (int, optional): Number of Amber relaxation steps (0 for none, 1 for top model).
+                                   Defaults to 0.
+        out_dir (str, optional): Directory to save the output files. Defaults to ".".
+        use_templates (bool, optional): Whether to use PDB templates. Defaults to False.
+        use_precomputed_msas (bool, optional): Whether to use precomputed MSAs. Defaults to False.
+        return_all_files (bool, optional): Whether to return all generated files from the remote
+                                           function or just the primary zip. Defaults to False.
+
+    Returns:
+        None
+    """
     from datetime import datetime
 
     fasta_str = open(input_fasta).read()

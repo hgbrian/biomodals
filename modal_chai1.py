@@ -1,4 +1,6 @@
-"""Chai-1r https://github.com/chaidiscovery/chai-lab
+"""Runs Chai-1, a protein-ligand co-folding model, on Modal.
+
+Chai-1r: https://github.com/chaidiscovery/chai-lab
 
 Example fasta
 ```
@@ -22,7 +24,14 @@ TIMEOUT = int(os.environ.get("TIMEOUT", 30))
 
 
 def download_models():
-    """Runs Chai-1 on a fasta file and returns the outputs"""
+    """Downloads Chai-1 models by running a minimal inference.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     import torch
     from chai_lab.chai1 import run_inference
 
@@ -64,7 +73,23 @@ def chai1(
     use_esm_embeddings: bool = True,
     chai1_kwargs:dict = {},
 ) -> list:
-    """Runs Chai1 on a fasta file and returns the outputs"""
+    """Runs Chai-1 on a FASTA file string and returns the output files.
+
+    Args:
+        input_faa_str (str): Content of the input FASTA file as a string.
+        input_faa_name (str): Original name of the input FASTA file (for naming outputs).
+                              Defaults to "input.faa".
+        num_trunk_recycles (int): Number of trunk recycles for the model. Defaults to 3.
+        num_diffn_timesteps (int): Number of diffusion timesteps. Defaults to 200.
+        seed (int): Random seed for reproducibility. Defaults to 42.
+        use_esm_embeddings (bool): Whether to use ESM embeddings. Defaults to True.
+        chai1_kwargs (dict): Additional keyword arguments to pass to `run_inference`.
+                             Defaults to an empty dict.
+
+    Returns:
+        list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative
+                                  output file path and its byte content.
+    """
     import torch
     from chai_lab.chai1 import run_inference
 
@@ -99,6 +124,18 @@ def main(
     run_name: str = None,
     chai1_kwargs: str = None,
 ):
+    """Local entrypoint for running Chai-1 predictions using Modal.
+
+    Args:
+        input_faa (str): Path to the input FASTA file.
+        out_dir (str): Directory to save the output files. Defaults to "./out/chai1".
+        run_name (str | None): Optional name for the run, used in the output directory structure.
+        chai1_kwargs (str | None): Optional string representation of a dictionary for additional
+                                   Chai-1 keyword arguments (e.g., '{"key": "value"}').
+
+    Returns:
+        None
+    """
     from datetime import datetime
 
     input_faa_str = open(input_faa).read()

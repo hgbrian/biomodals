@@ -1,4 +1,8 @@
-"""Run AF2Rank
+"""Ranks protein structures using AF2Rank/ColabDesign.
+
+This script provides a Modal app to run AF2Rank, a method for ranking protein structures
+based on AlphaFold2 predictions. It can take a PDB file as input, run the AF2Rank protocol
+using specified models and chains, and return various scores and the ranked structure.
 
 e.g.,
 ```
@@ -53,6 +57,15 @@ with image.imports():
     from scipy.stats import spearmanr
 
     def tmscore(x, y):
+        """Calculates the TMscore between two protein structures.
+
+        Args:
+            x (list): A list of coordinates for the first protein structure.
+            y (list): A list of coordinates for the second protein structure.
+
+        Returns:
+            dict: A dictionary containing 'rms', 'tms', and 'gdt' scores.
+        """
         # save to dumpy pdb files
         for n, z in enumerate([x, y]):
             out = open(f"{n}.pdb", "w")
@@ -67,8 +80,9 @@ with image.imports():
         output = os.popen("./TMscore 0.pdb 1.pdb")
 
         # parse outputs
-        def parse_float(x):
-            return float(x.split("=")[1].split()[0])
+        def parse_float(x_str):
+            """Parses a float from a TMscore output line."""
+            return float(x_str.split("=")[1].split()[0])
 
         o = {}
         for line in output:
@@ -92,7 +106,23 @@ with image.imports():
         dpi=100,
         **kwargs,
     ):
+        """Plots scores, such as TMscore vs. composite scores.
+
+        Args:
+            scores (list[dict]): A list of dictionaries, where each dictionary contains scoring data.
+            x (str): The key for the x-axis values in the scores.
+            y (str): The key for the y-axis values in the scores.
+            title (str | None): Optional title for the plot.
+            diag (bool): Whether to draw a diagonal line on the plot.
+            scale_axis (bool): Whether to scale axes from -0.1 to 1.1 if x or y are known score types.
+            dpi (int): Dots per inch for the plot.
+            **kwargs: Additional keyword arguments for `plt.scatter`.
+
+        Returns:
+            None
+        """
         def rescale(a, amin=None, amax=None):
+            """Rescales an array to the range [0, 1] based on provided min/max or array's own min/max."""
             a = np.copy(a)
             if amin is None:
                 amin = a.min()
@@ -142,7 +172,16 @@ with image.imports():
         print(spearmanr(x_vals, y_vals).correlation)
 
     class af2rank:
+        """A class to perform AF2Rank predictions using ColabDesign."""
         def __init__(self, pdb, chain=None, model_name="model_1_ptm", model_names=None):
+            """Initializes the af2rank class.
+
+            Args:
+                pdb (str): Path to the PDB file.
+                chain (str | None): Specific chain(s) to use from the PDB file.
+                model_name (str): Name of the AlphaFold2 model to use.
+                model_names (list[str] | None): Specific model names if not using a default set.
+            """
             self.args = {
                 "pdb": pdb,
                 "chain": chain,
@@ -153,6 +192,7 @@ with image.imports():
             self.reset()
 
         def reset(self):
+            """Resets and initializes the ColabDesign model."""
             from colabdesign import mk_af_model
             from colabdesign.shared.utils import copy_dict
 
@@ -170,6 +210,12 @@ with image.imports():
             self.wt = self.model._wt_aatype
 
         def set_pdb(self, pdb, chain=None):
+            """Sets the PDB file and chain for the model.
+
+            Args:
+                pdb (str): Path to the PDB file.
+                chain (str | None): Specific chain(s) to use from the PDB file.
+            """
             if chain is None:
                 chain = self.args["chain"]
             self.model.prep_inputs(pdb, chain=chain)
@@ -177,10 +223,23 @@ with image.imports():
             self.wt = self.model._wt_aatype
 
         def set_seq(self, seq):
+            """Sets the sequence for the model.
+
+            Args:
+                seq (str): Amino acid sequence.
+            """
             self.model.set_seq(seq=seq)
             self.wt = self.model._params["seq"][0].argmax(-1)
 
         def _get_score(self):
+            """Calculates and returns various scores from the model's auxiliary output.
+
+            Returns:
+                dict: A dictionary containing scores such as 'plddt', 'pae', 'ptm', 'iptm',
+                      'rmsd_io' (RMSD between input and output), 'tm_i' (TMscore to input if reference provided),
+                      'tm_o' (TMscore to output if reference provided), 'tm_io' (TMscore between input and output),
+                      and 'composite' (ptm * plddt * tm_io).
+            """
             from colabdesign.shared.utils import copy_dict
 
             score = copy_dict(self.model.aux["log"])
@@ -221,6 +280,26 @@ with image.imports():
             extras=None,
             verbose=True,
         ):
+            """Runs the AF2Rank prediction.
+
+            Args:
+                pdb (str | None): Path to a new PDB file to use for this prediction.
+                seq (str | None): Amino acid sequence to use for this prediction.
+                chain (str | None): Specific chain(s) to use from the PDB file.
+                input_template (bool): Whether to use the input structure as a template.
+                model_name (str | None): Specific AlphaFold2 model name for this prediction.
+                rm_seq (bool): Whether to remove the sequence from the template.
+                rm_sc (bool): Whether to remove sidechain information from the template.
+                rm_ic (bool): Whether to remove interchain information from the template (for multimers).
+                recycles (int): Number of recycles for the AlphaFold2 model.
+                iterations (int): Number of "manual" recycles using templates.
+                output_pdb (str | None): If provided, saves the predicted structure to this path.
+                extras (dict | None): Additional items to add to the score dictionary.
+                verbose (bool): Whether to print score summaries.
+
+            Returns:
+                dict: The score dictionary produced by `_get_score`, potentially updated with `extras`.
+            """
             if model_name is not None:
                 self.args["model_name"] = model_name
                 if "multimer" in model_name:
@@ -305,6 +384,23 @@ def run_af2rank(
     mask_sidechains: bool = False,
     mask_interchain: bool = False,
 ):
+    """Modal function for running AF2Rank.
+
+    Args:
+        pdb_str (str): The content of the PDB file as a string.
+        pdb_name (str | None): Optional name for the PDB file (used for output naming).
+        chains (str): Comma-separated string of chain IDs to use (e.g., "A" or "A,B").
+        model_name (str): Name of the AlphaFold2 model to use (e.g., "model_1_ptm", "model_1_multimer_v3").
+        num_recycles (int): Number of recycles for the AlphaFold2 model.
+        num_iterations (int): Number of "manual" recycles using templates.
+        mask_sequence (bool): Whether to remove the sequence from the template.
+        mask_sidechains (bool): Whether to remove sidechain information from the template.
+        mask_interchain (bool): Whether to remove interchain information from the template (for multimers).
+
+    Returns:
+        list[tuple[Path, bytes]]: A list of tuples, where each tuple contains the relative output
+                                  file path (Path object) and its byte content.
+    """
     import json
 
     if pdb_name is None:
@@ -352,6 +448,27 @@ def main(
     out_dir="./out/af2rank",
     run_name=None,
 ):
+    """Local entrypoint for the Modal app to run AF2Rank.
+
+    This function handles fetching the PDB data, invoking the remote Modal function
+    `run_af2rank`, and saving the results locally.
+
+    Args:
+        input_pdb (str): Path to the input PDB file.
+        chains (str): Comma-separated string of chain IDs to use (e.g., "A" or "A,B").
+        model_name (str | None): Name of the AlphaFold2 model. If None, defaults to "model_1_ptm".
+        num_recycles (int): Number of recycles for the AlphaFold2 model.
+        num_iterations (int): Number of "manual" recycles using templates.
+        mask_sequence (bool): Whether to remove the sequence from the template.
+        mask_sidechains (bool): Whether to remove sidechain information from the template.
+        mask_interchain (bool): Whether to remove interchain information from the template (for multimers).
+        out_dir (str): Directory to save the output files.
+        run_name (str | None): Optional name for the run, used to create a subdirectory in `out_dir`.
+                               If None, a timestamp-based name is used.
+
+    Returns:
+        None
+    """
     # model_{model_num}_multimer_v3
     from datetime import datetime
 

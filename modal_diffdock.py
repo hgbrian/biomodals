@@ -1,5 +1,6 @@
-"""
-# DiffDock 
+"""Runs DiffDock for molecular docking using a diffusion model on Modal.
+
+# DiffDock
 
 - setting batch_size=1 may help for very large proteins
 
@@ -82,6 +83,22 @@ image = (
     mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
 def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
+    """Runs DiffDock inference for a list of protein PDB and ligand MOL2 file pairs.
+
+    Args:
+        pdbs_ligands (list[tuple[str, str]]): A list of tuples, where each tuple contains
+                                              the path to a protein PDB file and a ligand MOL2 file.
+                                              Paths should be relative to `LOCAL_IN` if local,
+                                              or absolute within the Modal container.
+        batch_size (int): Batch size for DiffDock inference. Defaults to 5.
+                          Note: Only 1, 5, or 10 have been tested.
+
+    Returns:
+        list[tuple[Path, Path, str, bytes]]: A list of tuples, where each tuple contains
+                                             the input PDB path (as Path object relative to `LOCAL_IN`),
+                                             input ligand path (as Path object relative to `LOCAL_IN`),
+                                             output filename, and its byte content.
+    """
     import os
     from subprocess import run
 
@@ -128,6 +145,19 @@ def main(
     out_dir: str = "./out/diffdock",
     run_name: str = None,
 ):
+    """Local entrypoint to run DiffDock inference for protein-ligand pairs.
+
+    Args:
+        pdb_file (str): Comma-separated string of paths to PDB files.
+        mol2_file (str): Comma-separated string of paths to MOL2 ligand files.
+                         (Order should correspond to `pdb_file`).
+        batch_size (int): Batch size for DiffDock inference. Defaults to 5.
+        out_dir (str): Directory to save the output files. Defaults to "./out/diffdock".
+        run_name (str | None): Optional name for the run, used in the output directory structure.
+
+    Returns:
+        None
+    """
     from datetime import datetime
 
     pdbs_ligands = [
