@@ -8,7 +8,7 @@
 import os
 from pathlib import Path
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 GPU = os.environ.get("GPU", "L40S")
 TIMEOUT = os.environ.get("TIMEOUT", 20 * 60)
@@ -117,10 +117,9 @@ def score_af2m_binding(af2m_dict: dict, target_len: int, binders_len: list[int])
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_MSA_DIR, remote_path="/msas"),
     gpu=GPU,
-    timeout=TIMEOUT,
-    mounts=[Mount.from_local_dir(LOCAL_MSA_DIR, remote_path="/msas")],
+    timeout=TIMEOUT
 )
 def alphafold(
     fasta_name: str,

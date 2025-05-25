@@ -24,7 +24,7 @@ from pathlib import Path
 from warnings import warn
 
 import modal
-from modal import App, Image, Mount
+from modal import App, Image
 
 LOCAL_IN = "./in/diffdock"
 REMOTE_IN = "/in"
@@ -77,10 +77,9 @@ image = (
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     gpu=GPU,
-    timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * TIMEOUT_MINS
 )
 def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
     """Runs DiffDock inference for a list of protein PDB and ligand MOL2 file pairs.

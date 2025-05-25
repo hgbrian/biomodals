@@ -33,7 +33,7 @@ import warnings
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from modal import Image, Mount, App
+from modal import Image, App
 
 LOCAL_IN = "in/afdesign"
 LOCAL_OUT = "out/afdesign"
@@ -331,10 +331,9 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     gpu=GPU,
-    timeout=60 * 120,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * 120
 )
 def afdesign(
     pdb: str,
