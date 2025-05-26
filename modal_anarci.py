@@ -10,14 +10,12 @@ For more details, see https://github.com/oxpig/ANARCI
 
 from pathlib import Path
 from subprocess import run
+from datetime import datetime
+import tempfile
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 FORCE_BUILD = False
-LOCAL_IN = "./in/anarci"
-LOCAL_OUT = "./out/anarci"
-REMOTE_IN = "/in"
-REMOTE_OUT = LOCAL_OUT
 
 
 image = (
@@ -35,66 +33,93 @@ app = App("anarci", image=image)
 
 @app.function(
     timeout=60 * 15,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    # mounts removed
 )
-def anarci(input_fasta: str, params: str = None) -> list[tuple[str, bytes]]:
-    """Runs ANARCI on a given FASTA file or sequence string using specified parameters.
+def anarci(input_str: str, params: str = None) -> list[tuple[str, bytes]]:
+    """Runs ANARCI on a given FASTA sequence string using specified parameters.
 
     Args:
-        input_fasta (str): Path to the input FASTA file (must have .faa or .fasta extension)
-                           or a raw FASTA sequence string. If a path, it's treated as relative
-                           to `LOCAL_IN` if it exists there, otherwise as an absolute path
-                           or direct sequence input within the Modal container.
+        input_str (str): A raw FASTA sequence string.
         params (str | None): Optional string of additional parameters to pass to the ANARCI
                              command. If None, defaults to "--csv --ncpu 2".
 
     Returns:
-        list[tuple[str, bytes]]: A list of tuples, where each tuple contains the output
-                                 filename (str) and its byte content. The filenames are
-                                 derived from the input.
+        list[tuple[str, bytes]]: A list of tuples, where each tuple contains the basename
+                                 of the output file and its byte content.
     """
-    Path(REMOTE_OUT).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        input_file = tmp_path / "input.fasta"
+        output_file_stem = tmp_path / "anarci_results" # ANARCI will add .csv, .txt etc.
 
-    if (Path(LOCAL_IN) / input_fasta).exists():
-        input_path = Path(input_fasta)
-        assert input_path.suffix in (".faa", ".fasta"), f"not a fasta file: {input_fasta}"
-        input = Path(REMOTE_IN) / Path(input_fasta).relative_to(LOCAL_IN)
-        output = Path(REMOTE_OUT) / Path(input_fasta).stem
-    else:
-        input = input_fasta
-        output = Path(REMOTE_OUT) / input[:8]
+        with open(input_file, "w") as f:
+            f.write(input_str)
 
-    command = f"ANARCI -i {input} --outfile {output}"
+        command = f"ANARCI -i {input_file} --outfile {output_file_stem}"
 
-    if params is not None:
-        command += " " + params
-    else:
-        command += " --csv --ncpu 2"
+        if params is not None:
+            command += " " + params
+        else:
+            # Default to CSV output as it's a common structured format
+            command += " --csv --ncpu 2"
 
-    run(command, shell=True, check=True)
+        run(command, shell=True, check=True)
 
-    return [(out_file, open(out_file, "rb").read()) for out_file in Path(REMOTE_OUT).glob("**/*.*")]
+        # ANARCI can create multiple output files (e.g., .csv, .txt for numbering, aln for alignment)
+        # and also subdirectories like IMGT_output for some schemes.
+        # We glob for all files in the temporary directory.
+        output_files = []
+        for out_file_path in tmp_path.glob("**/*"):
+            if out_file_path.is_file():
+                 # The problem asks for the basename of the output file.
+                 # If ANARCI creates subdirectories, we should probably preserve that structure
+                 # in the name, or make it flat. The previous version of main was doing Path(out_file_name).name
+                 # which flattens. Let's keep it simple and return just the file's direct name.
+                 # If ANARCI puts files in "IMGT_output/A.csv", this will return "A.csv".
+                 # The main function will then save it as out_dir_full / "A.csv".
+                output_files.append((out_file_path.name, out_file_path.read_bytes()))
+        
+        return output_files
 
 
 @app.local_entrypoint()
-def main(input_fasta, params=None):
+def main(
+    input_fasta: str,
+    params: str = None,
+    run_name: str = None,
+    out_dir: str = "./out/anarci",
+):
     """Local entrypoint to run ANARCI via Modal.
 
-    This function takes an input FASTA file (path or string) and optional ANARCI
-    parameters, then calls the remote Modal `anarci` function and saves
-    the results locally.
+    This function takes an input FASTA file path, optional ANARCI
+    parameters, an optional run name, and an output directory. It then calls
+    the remote Modal `anarci` function with the file content and saves the
+    results locally, structured by `run_name` and `out_dir`.
 
     Args:
-        input_fasta (str): Path to the input FASTA file or a raw FASTA sequence string.
+        input_fasta (str): Path to the input FASTA file.
         params (str | None): Optional string of additional parameters for ANARCI.
+        run_name (str | None): Optional name for the run, used for organizing output files.
+                               If None, a timestamp-based name is used.
+        out_dir (str): Directory to save the output files. Defaults to "./out/anarci".
 
     Returns:
         None
     """
-    outputs = anarci.remote(input_fasta, params)
+    input_fasta_path = Path(input_fasta)
+    input_content = input_fasta_path.read_text()
 
-    for out_file, out_content in outputs:
-        Path(out_file).parent.mkdir(parents=True, exist_ok=True)
+    outputs = anarci.remote(input_content, params)
+
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+    out_dir_full = Path(out_dir) / (run_name or today)
+
+    for out_file_name, out_content in outputs:
+        # Construct the full output path, ensuring the filename from ANARCI is used.
+        # ANARCI output files might be in subdirectories (e.g. "IMGT_output/A.csv"),
+        # so we take the filename part from the returned out_file_name.
+        output_file_path = out_dir_full / Path(out_file_name).name
+        output_file_path.parent.mkdir(parents=True, exist_ok=True)
         if out_content:
-            with open(out_file, "wb") as out:
+            with open(output_file_path, "wb") as out:
                 out.write(out_content)
