@@ -11,7 +11,7 @@ For more details, see https://github.com/oxpig/ANARCI
 from pathlib import Path
 from subprocess import run
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/anarci"
@@ -34,8 +34,8 @@ app = App("anarci", image=image)
 
 
 @app.function(
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     timeout=60 * 15,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
 def anarci(input_fasta: str, params: str = None) -> list[tuple[str, bytes]]:
     """Runs ANARCI on a given FASTA file or sequence string using specified parameters.

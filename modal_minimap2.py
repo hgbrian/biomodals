@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from subprocess import run
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/minimap2"
@@ -27,10 +27,9 @@ image = (
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     gpu=None,
-    timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * TIMEOUT_MINS
 )
 def minimap2_short_reads(input_fasta: str, input_reads: str, params: tuple) -> list[str, str]:
     input_fasta = Path(input_fasta).relative_to(LOCAL_IN)

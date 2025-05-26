@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Union
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/md_protein_ligand"
@@ -45,10 +45,9 @@ with image.imports():
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     gpu=GPU,
-    timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * TIMEOUT_MINS
 )
 def simulate_md_ligand(
     pdb_id: str,

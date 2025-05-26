@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 
-from modal import Image, Mount, App
+from modal import Image, App
 
 MODAL_IN = "./modal_in/hacnet"
 MODAL_OUT = "./modal_out/hacnet"
@@ -20,8 +20,7 @@ image = (Image
          .run_commands("mkdir /content")
         )
 
-@app.function(image=image, gpu="T4", timeout=60*15,
-               mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
+@app.function(image=image.add_local_dir(MODAL_IN, remote_path="/in"), gpu="T4", timeout=60*15)
 def run_hacnet(pdbs_ligands:list, verbose=False) -> dict:
     from HACNet.functions import predict_pkd
 

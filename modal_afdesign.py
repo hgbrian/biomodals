@@ -33,7 +33,7 @@ import warnings
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from modal import Image, Mount, App
+from modal import Image, App
 
 LOCAL_IN = "in/afdesign"
 LOCAL_OUT = "out/afdesign"
@@ -44,7 +44,7 @@ DATA_DIR = "/"
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 image = (
-    Image.micromamba()
+    Image.debian_slim().micromamba(python_version="3.11")
     .apt_install("git", "wget", "aria2", "ffmpeg")
     .pip_install(
         "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
@@ -331,10 +331,9 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     gpu=GPU,
-    timeout=60 * 120,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * 120
 )
 def afdesign(
     pdb: str,

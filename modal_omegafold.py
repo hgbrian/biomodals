@@ -8,7 +8,7 @@ from pathlib import Path
 from subprocess import run
 
 import modal
-from modal import App, Image, Mount
+from modal import App, Image
 
 FORCE_BUILD = False
 LOCAL_IN = "./in/omegafold"
@@ -30,10 +30,9 @@ image = (
 
 
 @app.function(
-    image=image,
+    image=image.add_local_dir(LOCAL_IN, remote_path=REMOTE_IN),
     gpu=GPU,
-    timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * TIMEOUT_MINS
 )
 def omegafold(input_fasta: str, subbatch_size: int) -> list[tuple[str, bytes]]:
     """Run OmegaFold protein structure prediction.

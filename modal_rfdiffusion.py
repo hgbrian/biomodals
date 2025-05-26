@@ -36,7 +36,7 @@ import os
 from subprocess import run
 from pathlib import Path
 
-from modal import Image, Mount, App
+from modal import Image, App
 
 MODAL_IN = "./in/rfdiffusion"
 MODAL_OUT = "./out"
@@ -407,8 +407,7 @@ def designability_test(contigs, path, copies, num_designs,
     run(["python", "colabdesign/rf/designability_test.py", opts], check=True)
 
 
-@app.function(image=image, gpu=GPU, timeout=60*15,
-               mounts=[Mount.from_local_dir(MODAL_IN, remote_path="/in")])
+@app.function(image=image.add_local_dir(MODAL_IN, remote_path="/in"), gpu=GPU, timeout=60*15)
 def rfdiffusion(contigs:str, pdb:str,
                 iterations:int=25,
                 hotspot:str="",
