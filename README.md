@@ -11,7 +11,7 @@ python3 -m modal setup
 
 Runs `omegafold --model 2 <fasta>`
 
-This can run out of memory, and may need an 80GB A100. 
+This can run out of memory, and may need an 80GB A100.
 
 ```
 modal run modal_omegafold.py --input-fasta in/omegafold/insulin.faa
@@ -71,7 +71,8 @@ modal run modal_pdb2png.py --input-pdb in/pdb2png/1igy.pdb --protein-zoom 0.8 --
 A tool for annotating antibody sequences https://github.com/oxpig/ANARCI
 
 ```
-modal run modal_anarci.py --input-fasta in/anarci/antibody.faa
+echo ">test_anarci\nDIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLESGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIKRT" > test_anarci.faa
+modal run modal_anarci.py --input-fasta test_anarci.faa
 ```
 
 ## MD_protein_ligand
