@@ -58,32 +58,17 @@ def download_model():
     Returns:
         None
     """
-    from subprocess import run
+    from boltz.main import download_boltz1, download_boltz2
+    import urllib
+    import urllib.request
 
-    if not Path(f"/{BOLTZ_VOLUME_NAME}/boltz1_conf.ckpt").exists():
-        Path(in_dir := "/tmp/tmp_in_boltz").mkdir(parents=True, exist_ok=True)
-        open(in_faa := Path(in_dir) / "tmp.fasta", "w").write(
-            ">A|PROTEIN|\nMAWTPLLLLLLSH\n"
-        )
+    if not Path(f"{CACHE_DIR}/boltz1_conf.ckpt").exists():
+        print("downloading boltz 1")
+        download_boltz1(Path(CACHE_DIR))
 
-        run(
-            [
-                "boltz",
-                "predict",
-                str(in_faa),
-                "--out_dir",
-                "/tmp",
-                "--cache",
-                CACHE_DIR,
-                "--use_msa_server",
-            ],
-            check=True,
-        )
-
-    # New: Copy it over since "/root/.boltz" is default in boltz
-    if CACHE_DIR != "/root/.boltz":
-        Path("/root/.boltz").mkdir(exist_ok=True, parents=True)
-        run(f"cp {CACHE_DIR}/* /root/.boltz/", shell=True, check=True)
+    if not Path(f"{CACHE_DIR}/boltz2_conf.ckpt").exists():
+        print("downloading boltz 2")
+        download_boltz2(Path(CACHE_DIR))
 
 
 image = (
@@ -102,7 +87,7 @@ image = (
     )
     .run_commands("python -m colabfold.download")
     .apt_install("build-essential")
-    .pip_install("boltz", "pyyaml")
+    .pip_install("boltz==2.0.3", "pyyaml")
     .run_function(
         download_model,
         gpu="a10g",
@@ -209,7 +194,7 @@ def boltz(input_str: str, params_str: str | None = None) -> list:
     with TemporaryDirectory() as in_dir, TemporaryDirectory() as out_dir:
         if input_str[0] == ">":
             open(in_faa := Path(in_dir) / "in.faa", "w").write(input_str)
-            fixed_faa_str = _fasta_to_yaml(in_faa)
+            fixed_faa_str = _fasta_to_yaml(str(in_faa))
             open(fixed_yaml := Path(in_dir) / "fixed.yaml", "w").write(fixed_faa_str)
         else:
             open(fixed_yaml := Path(in_dir) / "fixed.yaml", "w").write(input_str)
@@ -256,12 +241,11 @@ def main(
     """
     from datetime import datetime
 
-    # New: Check that at least one input is provided
     assert input_faa or input_yaml, "input_faa or input_yaml required"
 
     input_str = open(input_yaml or input_faa).read()
 
-    outputs = boltz.remote(input_str, params_str=params_str)  # New: Use boltz_from_file
+    outputs = boltz.remote(input_str, params_str=params_str)
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
     out_dir_full = Path(out_dir) / (run_name or today)
