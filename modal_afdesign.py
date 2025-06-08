@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Designs protein binders, including cyclic peptides, using AFDesign on Modal.
 
 Adapting the AFDesign colab for modal
@@ -24,21 +30,19 @@ modal run modal_afdesign.py --target-chain C --pdb in/afdesign/1igy.pdb
 ```
 """
 
+import os
 import re
 import subprocess
-from subprocess import run
 import tempfile
 import warnings
-
 from pathlib import Path
+from subprocess import run
 from tempfile import NamedTemporaryFile
 
-from modal import Image, Mount, App
+from modal import Image, App
 
-LOCAL_IN = "in/afdesign"
-LOCAL_OUT = "out/afdesign"
-REMOTE_IN = "/in"
-GPU = "a100"
+GPU = os.environ.get("GPU", "A100")
+TIMEOUT = int(os.environ.get("TIMEOUT", 120))
 DATA_DIR = "/"
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -289,12 +293,19 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
         if pdb_redo:
             pdb_name = f"{pdb_code_or_file}_final.pdb"
             out_path = Path(out_dir) / Path(pdb_name)
-            run(
+            try:
+                run(
                 f"wget -qnc https://pdb-redo.eu/db/{pdb_code_or_file}/{pdb_name} -O {out_path}",
                 shell=True,
                 check=True,
-            )
-        else:
+                )
+            except subprocess.CalledProcessError as e:
+                print("Failed to find pdb-redo version. Using RSCB pdb.")
+                pdb_redo = False
+            else:
+                return out_path
+
+        if pdb_redo is False:
             pdb_name = f"{pdb_code_or_file}.pdb{'1' if biological_assembly else ''}"
             out_path = Path(out_dir) / Path(pdb_name)
             run(
@@ -333,11 +344,12 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
 @app.function(
     image=image,
     gpu=GPU,
-    timeout=60 * 120,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=TIMEOUT * 60,
 )
 def afdesign(
-    pdb: str,
+    pdb_content: bytes | None,
+    pdb_name: str,
+    is_pdb_id: bool,
     target_chain: str,
     target_hotspot=None,
     target_flexible: bool = True,
@@ -356,7 +368,9 @@ def afdesign(
     """Designs protein binders using AFDesign on Modal, with options for cyclic peptides and various optimization strategies.
 
     Args:
-        pdb (str): PDB code, UniProt code (to fetch AlphaFoldDB model), or path to a PDB file.
+        pdb_content (bytes | None): Content of the PDB file as bytes, or None if using PDB ID.
+        pdb_name (str): Name/identifier for the PDB (for output naming).
+        is_pdb_id (bool): True if pdb_name is a PDB/UniProt ID to download, False if using local content.
         target_chain (str): Chain(s) to design binder against. If multiple chains are provided (e.g., "AB"),
                             they will be merged into the first character of the string (e.g., "A").
         target_hotspot (str | None, optional): Restrict loss to predefined positions on target
@@ -407,214 +421,223 @@ def afdesign(
 
     num_models = 5 if num_models == "all" else int(num_models)
 
-    if (Path(REMOTE_IN) / Path(pdb).relative_to(LOCAL_IN)).is_file():
-        pdb = str(Path(REMOTE_IN) / Path(pdb).relative_to(LOCAL_IN))
+    from tempfile import TemporaryDirectory
 
-    x = {
-        "pdb_filename": pdb,
-        "chain": target_chain,
-        "binder_len": binder_len,
-        "binder_chain": binder_chain,
-        "hotspot": target_hotspot,
-        "use_multimer": use_multimer,
-        "rm_target_seq": target_flexible,
-    }
+    with TemporaryDirectory() as td_in:
+        if is_pdb_id:
+            # Use the PDB ID directly for get_pdb function
+            pdb_input = pdb_name
+        else:
+            # Write PDB content to temporary file
+            temp_pdb_file = Path(td_in) / "input.pdb"
+            temp_pdb_file.write_bytes(pdb_content)
+            pdb_input = str(temp_pdb_file)
 
-    # ------------------------------------------------------------------------------
-    # BN added this to extract only chains A and B
-    #
-    _temp_pdb_file = get_pdb(x["pdb_filename"], pdb_redo=pdb_redo)
+        x = {
+            "pdb_filename": pdb_input,
+            "chain": target_chain,
+            "binder_len": binder_len,
+            "binder_chain": binder_chain,
+            "hotspot": target_hotspot,
+            "use_multimer": use_multimer,
+            "rm_target_seq": target_flexible,
+        }
 
-    if merge_chains is not None:
-        _temp_pdb_file = join_chains(_temp_pdb_file, target_chain, merge_chains)
-    x["pdb_filename"] = _temp_pdb_file
+        # ------------------------------------------------------------------------------
+        # BN added this to extract only chains A and B
+        #
+        _temp_pdb_file = get_pdb(x["pdb_filename"], pdb_redo=pdb_redo)
 
-    # ------------------------------------------------------------------------------
-    # BN add bias for Cysteine cyclic peptide
-    #
-    _bias = None
-    if set_fixed_aas is not None:
-        aa_order = residue_constants.restype_order
-        assert (
-            len(set_fixed_aas) == binder_len
-        ), f"add_fixed_aas: {len(set_fixed_aas)} must be same length as binder_len: {binder_len}"
-        assert len(aa_order.keys()) == 20, "restype_order has changed"
-        _bias = np.zeros((binder_len, len(residue_constants.restype_order)))
-        for n, aa in enumerate(set_fixed_aas):
-            if aa in aa_order:
-                _bias[n, aa_order[aa]] = 1e16
+        if merge_chains is not None:
+            _temp_pdb_file = join_chains(_temp_pdb_file, target_chain, merge_chains)
+        x["pdb_filename"] = _temp_pdb_file
 
-    # TODO check this -- comes from the colab; something to do with redos?
-    x_prev = None
-    if "x_prev" not in dir() or x != x_prev:
-        clear_mem()
-        model = mk_afdesign_model(
-            protocol="binder",
-            use_multimer=x["use_multimer"],
-            num_recycles=num_recycles,
-            recycle_mode="sample",
-            data_dir=DATA_DIR,
+        # ------------------------------------------------------------------------------
+        # BN add bias for Cysteine cyclic peptide
+        #
+        _bias = None
+        if set_fixed_aas is not None:
+            aa_order = residue_constants.restype_order
+            assert (
+                len(set_fixed_aas) == binder_len
+            ), f"add_fixed_aas: {len(set_fixed_aas)} must be same length as binder_len: {binder_len}"
+            assert len(aa_order.keys()) == 20, "restype_order has changed"
+            _bias = np.zeros((binder_len, len(residue_constants.restype_order)))
+            for n, aa in enumerate(set_fixed_aas):
+                if aa in aa_order:
+                    _bias[n, aa_order[aa]] = 1e16
+
+        # TODO check this -- comes from the colab; something to do with redos?
+        x_prev = None
+        if "x_prev" not in dir() or x != x_prev:
+            clear_mem()
+            model = mk_afdesign_model(
+                protocol="binder",
+                use_multimer=x["use_multimer"],
+                num_recycles=num_recycles,
+                recycle_mode="sample",
+                data_dir=DATA_DIR,
+            )
+            model.prep_inputs(**x, ignore_missing=False)
+            # BN make cyclic peptide
+            if cyclic_peptide:
+                add_cyclic_offset(model)
+
+            x_prev = copy_dict(x)
+            print("target length:", model._target_len)
+            print("binder length:", model._binder_len)
+            # TODO check this, seems redundant
+            binder_len = model._binder_len
+
+        # ------------------------------------------------------------------------------
+        # run AfDesign
+        #
+        # optimizer:
+        # `pssm_semigreedy` - uses the designed PSSM to bias semigreedy opt. (Recommended)
+        # `3stage` - gradient based optimization (GD) (logits → soft → hard)
+        # `pssm` - GD optimize (logits → soft) to get a sequence profile (PSSM).
+        # `semigreedy` - tries X random mutations, accepts those that decrease loss
+        # `logits` - GD optimize logits inputs (continious)
+        # `soft` - GD optimize softmax(logits) inputs (probabilities)
+        # `hard` - GD optimize one_hot(logits) inputs (discrete)
+        # WARNING: The output sequence from `pssm`,`logits`,`soft` is not one_hot.
+        # To get a valid sequence use the other optimizers, or redesign the output backbone
+        # with another protocol like ProteinMPNN.
+        #
+
+        optimizer: str = "pssm_semigreedy"  # @param ["pssm_semigreedy", "3stage", "semigreedy", "pssm", "logits", "soft", "hard"]
+
+        # advanced GD settings
+        GD_method: str = "sgd"  # @param ["adabelief", "adafactor", "adagrad", "adam", "adamw", "fromage", "lamb", "lars", "noisy_sgd", "dpsgd", "radam", "rmsprop", "sgd", "sm3", "yogi"]
+        learning_rate: float = 0.1  # @param {type:"raw"}
+        norm_seq_grad: bool = True
+        dropout: bool = True
+
+        # ------------------------------------------------------------------------------
+        # BN added Cysteine cyclic peptide bias here
+        #
+        if _bias is not None:
+            model.restart(seq=binder_seq, bias=_bias)
+        else:
+            model.restart(seq=binder_seq)
+
+        model.set_optimizer(
+            optimizer=GD_method, learning_rate=learning_rate, norm_seq_grad=norm_seq_grad
         )
-        model.prep_inputs(**x, ignore_missing=False)
-        # BN make cyclic peptide
-        if cyclic_peptide:
-            add_cyclic_offset(model)
+        models = model._model_names[:num_models]
 
-        x_prev = copy_dict(x)
-        print("target length:", model._target_len)
-        print("binder length:", model._binder_len)
-        # TODO check this, seems redundant
-        binder_len = model._binder_len
+        flags = {"num_recycles": num_recycles, "models": models, "dropout": dropout}
 
-    # ------------------------------------------------------------------------------
-    # run AfDesign
-    #
-    # optimizer:
-    # `pssm_semigreedy` - uses the designed PSSM to bias semigreedy opt. (Recommended)
-    # `3stage` - gradient based optimization (GD) (logits → soft → hard)
-    # `pssm` - GD optimize (logits → soft) to get a sequence profile (PSSM).
-    # `semigreedy` - tries X random mutations, accepts those that decrease loss
-    # `logits` - GD optimize logits inputs (continious)
-    # `soft` - GD optimize softmax(logits) inputs (probabilities)
-    # `hard` - GD optimize one_hot(logits) inputs (discrete)
-    # WARNING: The output sequence from `pssm`,`logits`,`soft` is not one_hot.
-    # To get a valid sequence use the other optimizers, or redesign the output backbone
-    # with another protocol like ProteinMPNN.
-    #
+        if optimizer == "3stage":
+            model.design_3stage(120, 60, 10, **flags)
+            pssm = softmax(model._tmp["seq_logits"], -1)
 
-    optimizer: str = "pssm_semigreedy"  # @param ["pssm_semigreedy", "3stage", "semigreedy", "pssm", "logits", "soft", "hard"]
+        if optimizer == "pssm_semigreedy":
+            model.design_pssm_semigreedy(
+                soft_iters=soft_iters, hard_iters=hard_iters, **flags
+            )
+            pssm = softmax(model._tmp["seq_logits"], 1)
 
-    # advanced GD settings
-    GD_method: str = "sgd"  # @param ["adabelief", "adafactor", "adagrad", "adam", "adamw", "fromage", "lamb", "lars", "noisy_sgd", "dpsgd", "radam", "rmsprop", "sgd", "sm3", "yogi"]
-    learning_rate: float = 0.1  # @param {type:"raw"}
-    norm_seq_grad: bool = True
-    dropout: bool = True
+        if optimizer == "semigreedy":
+            model.design_pssm_semigreedy(0, 32, **flags)
+            pssm = None
 
-    # ------------------------------------------------------------------------------
-    # BN added Cysteine cyclic peptide bias here
-    #
-    if _bias is not None:
-        model.restart(seq=binder_seq, bias=_bias)
-    else:
-        model.restart(seq=binder_seq)
+        if optimizer == "pssm":
+            model.design_logits(120, e_soft=1.0, num_models=1, ramp_recycles=True, **flags)
+            model.design_soft(32, num_models=1, **flags)
+            flags.update({"dropout": False, "save_best": True})
+            model.design_soft(10, num_models=num_models, **flags)
+            pssm = softmax(model.aux["seq"]["logits"], -1)
 
-    model.set_optimizer(
-        optimizer=GD_method, learning_rate=learning_rate, norm_seq_grad=norm_seq_grad
-    )
-    models = model._model_names[:num_models]
+        optimizer_funcs = {
+            "logits": model.design_logits,
+            "soft": model.design_soft,
+            "hard": model.design_hard,
+        }
 
-    flags = {"num_recycles": num_recycles, "models": models, "dropout": dropout}
+        if optimizer in optimizer_funcs:
+            optimizer_funcs[optimizer](120, num_models=1, ramp_recycles=True, **flags)
+            flags.update({"dropout": False, "save_best": True})
+            optimizer_funcs[optimizer](10, num_models=num_models, **flags)
+            pssm = softmax(model.aux["seq"]["logits"], -1)
 
-    if optimizer == "3stage":
-        model.design_3stage(120, 60, 10, **flags)
-        pssm = softmax(model._tmp["seq_logits"], -1)
+        model.save_pdb(f"{model.protocol}.pdb")
 
-    if optimizer == "pssm_semigreedy":
-        model.design_pssm_semigreedy(
-            soft_iters=soft_iters, hard_iters=hard_iters, **flags
-        )
-        pssm = softmax(model._tmp["seq_logits"], 1)
+        # display hallucinated protein {run: "auto"}
+        color: str = "pLDDT"  # @param ["chain", "pLDDT", "rainbow"]
+        show_sidechains: bool = False  # @param {type:"boolean"}
+        show_mainchains: bool = True  # @param {type:"boolean"}
+        color_HP: bool = False  # @param {type:"boolean"}
+        animate: bool = True  # @param {type:"boolean"}
 
-    if optimizer == "semigreedy":
-        model.design_pssm_semigreedy(0, 32, **flags)
-        pssm = None
+        try:
+            model.plot_pdb(
+                show_sidechains=show_sidechains,
+                show_mainchains=show_mainchains,
+                color=color,
+                color_HP=color_HP,
+                animate=animate,
+            )
+        except Exception as e:
+            print("requires jupyter:", e)
 
-    if optimizer == "pssm":
-        model.design_logits(120, e_soft=1.0, num_models=1, ramp_recycles=True, **flags)
-        model.design_soft(32, num_models=1, **flags)
-        flags.update({"dropout": False, "save_best": True})
-        model.design_soft(10, num_models=num_models, **flags)
-        pssm = softmax(model.aux["seq"]["logits"], -1)
+        # takes 30s+ so may not be worth it
+        html_content = model.animate(dpi=100)
 
-    optimizer_funcs = {
-        "logits": model.design_logits,
-        "soft": model.design_soft,
-        "hard": model.design_hard,
-    }
+        out_name = f"{model.protocol}_{pdb_name}_{target_chain}_{model.get_seqs()[0]}_{round(model.get_loss()[-1], 2)}"
+        model.save_pdb(f"{out_name}.pdb")
 
-    if optimizer in optimizer_funcs:
-        optimizer_funcs[optimizer](120, num_models=1, ramp_recycles=True, **flags)
-        flags.update({"dropout": False, "save_best": True})
-        optimizer_funcs[optimizer](10, num_models=num_models, **flags)
-        pssm = softmax(model.aux["seq"]["logits"], -1)
+        # ------------------------------------------------------------------------------
+        # BN added this
+        # Add data into the REMARK section of the PDB file
+        #
+        pdb_txt = open(f"{out_name}.pdb").read()
+        with open(f"{out_name}.pdb", "w") as out:
+            for n, (k, v) in enumerate(model._tmp["best"]["aux"]["log"].items()):
+                remark_text = f"{k}: {v}"
+                remark_line = f"REMARK {n+1:<3} {remark_text:<69}\n"
+                out.write(remark_line)
+            out.write(pdb_txt)
 
-    model.save_pdb(f"{model.protocol}.pdb")
+        model.get_seqs()
 
-    # display hallucinated protein {run: "auto"}
-    color: str = "pLDDT"  # @param ["chain", "pLDDT", "rainbow"]
-    show_sidechains: bool = False  # @param {type:"boolean"}
-    show_mainchains: bool = True  # @param {type:"boolean"}
-    color_HP: bool = False  # @param {type:"boolean"}
-    animate: bool = True  # @param {type:"boolean"}
+        # ------------------------------------------------------------------------------
+        # Amino acid probabilties
+        #
+        # Use residue_constants.restypes for amino acid alphabet
+        if "pssm" in dir() and pssm is not None:
+            fig = px.imshow(
+                pssm.mean(0).T,
+                labels=dict(x="positions", y="amino acids", color="probability"),
+                y=residue_constants.restypes,
+                zmin=0,
+                zmax=1,
+                template="simple_white",
+            )
+            fig.update_xaxes(side="top")
+            fig.write_image(f"{out_name}.png")
 
-    try:
-        model.plot_pdb(
-            show_sidechains=show_sidechains,
-            show_mainchains=show_mainchains,
-            color=color,
-            color_HP=color_HP,
-            animate=animate,
-        )
-    except Exception as e:
-        print("requires jupyter:", e)
+        # plddt etc in here
+        log = model._tmp["best"]["aux"]["log"]
 
-    # takes 30s+ so may not be worth it
-    html_content = model.animate(dpi=100)
-
-    out_name = f"{model.protocol}_{Path(pdb).stem}_{target_chain}_{model.get_seqs()[0]}_{round(model.get_loss()[-1], 2)}"
-    model.save_pdb(f"{out_name}.pdb")
-
-    # ------------------------------------------------------------------------------
-    # BN added this
-    # Add data into the REMARK section of the PDB file
-    #
-    pdb_txt = open(f"{out_name}.pdb").read()
-    with open(f"{out_name}.pdb", "w") as out:
-        for n, (k, v) in enumerate(model._tmp["best"]["aux"]["log"].items()):
-            remark_text = f"{k}: {v}"
-            remark_line = f"REMARK {n+1:<3} {remark_text:<69}\n"
-            out.write(remark_line)
-        out.write(pdb_txt)
-
-    model.get_seqs()
-
-    # ------------------------------------------------------------------------------
-    # Amino acid probabilties
-    #
-    # Use residue_constants.restypes for amino acid alphabet
-    if "pssm" in dir() and pssm is not None:
-        fig = px.imshow(
-            pssm.mean(0).T,
-            labels=dict(x="positions", y="amino acids", color="probability"),
-            y=residue_constants.restypes,
-            zmin=0,
-            zmax=1,
-            template="simple_white",
-        )
-        fig.update_xaxes(side="top")
-        fig.write_image(f"{out_name}.png")
-
-    # plddt etc in here
-    log = model._tmp["best"]["aux"]["log"]
-
-    return [
-        (f"{out_name}.log", str(log).encode("utf-8")),
-        (f"{out_name}.html", html_content.encode("utf-8")),
-        (f"{out_name}.pdb", open(f"{out_name}.pdb", "rb").read()),
-        (f"{out_name}.png", open(f"{out_name}.png", "rb").read()),
-    ]
+        return [
+            (f"{out_name}.log", str(log).encode("utf-8")),
+            (f"{out_name}.html", html_content.encode("utf-8")),
+            (f"{out_name}.pdb", open(f"{out_name}.pdb", "rb").read()),
+            (f"{out_name}.png", open(f"{out_name}.png", "rb").read()),
+        ]
 
 
 @app.local_entrypoint()
 def main(
     pdb: str,
     target_chain: str,
-    target_hotspot: str = None,
+    target_hotspot: str | None = None,
     target_flexible: bool = True,
     binder_len: int = 12,
-    binder_seq: str = None,
-    binder_chain: str = None,
-    set_fixed_aas: str = None,
+    binder_seq: str | None = None,
+    binder_chain: str | None = None,
+    set_fixed_aas: str | None = None,
     linear_peptide: bool = False,
     use_multimer: bool = False,
     num_recycles: int = 3,
@@ -623,6 +646,8 @@ def main(
     soft_iters: int = 30,
     hard_iters: int = 6,
     num_parallel: int = 1,
+    out_dir: str = "./out/afdesign",
+    run_name: str | None = None,
 ):
     """Local entrypoint to run AFDesign predictions, potentially in parallel.
 
@@ -658,12 +683,31 @@ def main(
 
     assert hard_iters >= 2, "fails on hard_iters=1"
 
+    from datetime import datetime
+
+    # Check if input is a file path or PDB ID
+    pdb_path = Path(pdb)
+    if pdb_path.exists():
+        # Local file - read content and pass as bytes
+        pdb_content = pdb_path.read_bytes()
+        pdb_name = pdb_path.stem
+        is_pdb_id = False
+    elif len(pdb) in [4, 5] and pdb.replace("-", "").isalnum():
+        # Looks like a PDB ID or UniProt ID - pass as string to remote function
+        pdb_content = None
+        pdb_name = pdb
+        is_pdb_id = True
+    else:
+        raise FileNotFoundError(f"PDB file not found and '{pdb}' doesn't look like a valid PDB/UniProt ID: {pdb}")
+
     # I can't figure out how to use kwargs with map so order is important
     pdb_redo = not use_rcsb_pdb
     cyclic_peptide = not linear_peptide
     args = tuple(
         (
-            pdb,
+            pdb_content,
+            pdb_name,
+            is_pdb_id,
             target_chain,
             target_hotspot,
             target_flexible,
@@ -681,10 +725,13 @@ def main(
         )
     )
 
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+    out_dir_full = Path(out_dir) / (run_name or today)
+
     # use starmap to pass multiple args
     for outputs in afdesign.starmap([args for _ in range(num_parallel)]):
         for out_file, out_content in outputs:
-            out_path = Path(LOCAL_OUT) / out_file
+            out_path = Path(out_dir_full) / out_file
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_content:
                 with open(out_path, "wb") as out:
