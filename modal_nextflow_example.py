@@ -1,3 +1,14 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
+"""
+Basic example script running nextflow on modal.
+Does not do anything except get the installation working.
+Some of the installation steps are probably not necessary.
+"""
 from subprocess import run
 
 from modal import App, Image

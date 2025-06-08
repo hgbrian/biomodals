@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Run minimap2 on short reads. Mostly just a demo.
 
 Runs minimap2 on short reads.
@@ -8,14 +14,9 @@ import os
 from pathlib import Path
 from subprocess import run
 
-from modal import App, Image, Mount
+from modal import App, Image
 
-FORCE_BUILD = False
-LOCAL_IN = "./in/minimap2"
-LOCAL_OUT = "./out/minimap2"
-REMOTE_IN = "/in"
-REMOTE_OUT = LOCAL_OUT
-TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
+TIMEOUT = int(os.environ.get("TIMEOUT", 15))
 
 app = App()
 
@@ -29,31 +30,34 @@ image = (
 @app.function(
     image=image,
     gpu=None,
-    timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=60 * TIMEOUT,
 )
-def minimap2_short_reads(input_fasta: str, input_reads: str, params: tuple) -> list[str, str]:
-    input_fasta = Path(input_fasta).relative_to(LOCAL_IN)
-    input_reads = Path(input_reads).relative_to(LOCAL_IN)
+def minimap2_short_reads(
+    input_fasta_bytes: bytes, input_reads_bytes: bytes, params: str
+) -> list[tuple[str, bytes]]:
+    from tempfile import TemporaryDirectory
 
-    Path(REMOTE_OUT).mkdir(parents=True, exist_ok=True)
-    out_path = Path(REMOTE_OUT) / f"{input_fasta.stem}_{input_reads.stem}.paf"
+    with TemporaryDirectory() as td_in, TemporaryDirectory() as td_out:
+        Path(input_fasta := f"{td_in}/ref.fasta").write_bytes(input_fasta_bytes)
+        Path(input_reads := f"{td_in}/reads.fastq").write_bytes(input_reads_bytes)
+        out_path = f"{td_out}/{Path(input_fasta).stem}_{Path(input_reads).stem}.paf"
 
-    run(
-        f"/minimap2/minimap2 {params} {Path(REMOTE_IN) / input_fasta} {Path(REMOTE_IN) / input_reads} -o {out_path}",
-        shell=True,
-        check=True,
-    )
+        run(
+            f"/minimap2/minimap2 {params} {input_fasta} {input_reads} -o {out_path}",
+            shell=True,
+            check=True,
+        )
 
-    return [(out_path, open(out_path, "rb").read())]
+        return [(out_path, open(out_path, "rb").read())]
 
 
 @app.local_entrypoint()
-def main(input_fasta: str, input_reads: str, params: str = "-ax sr"):
-    outputs = minimap2_short_reads.remote(input_fasta, input_reads, params)
+def main(input_ref_fasta: str, input_reads_fastq: str, params: str = "-ax sr"):
+    input_fasta_bytes = Path(input_ref_fasta).read_bytes()
+    input_reads_bytes = Path(input_reads_fastq).read_bytes()
+
+    outputs = minimap2_short_reads.remote(input_fasta_bytes, input_reads_bytes, params)
 
     for out_file, out_content in outputs:
         Path(out_file).parent.mkdir(parents=True, exist_ok=True)
-        if out_content:
-            with open(out_file, "wb") as out:
-                out.write(out_content)
+        Path(out_file).write_bytes(out_content)
