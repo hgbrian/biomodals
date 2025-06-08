@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Runs ANARCI (Antibody Numbering and Antigen Receptor ClassIfication) on Modal.
 
 ANARCI Usage:
@@ -15,13 +21,10 @@ import tempfile
 
 from modal import App, Image
 
-FORCE_BUILD = False
-
-
 image = (
     Image.micromamba()
     .apt_install("git")
-    .pip_install(["biopython"], force_build=FORCE_BUILD)
+    .pip_install("biopython")
     .micromamba_install(["libstdcxx-ng", "hmmer=3.3.2"], channels=["conda-forge", "bioconda"])
     .run_commands(
         "git clone https://github.com/oxpig/ANARCI && cd ANARCI && python setup.py install"
@@ -35,7 +38,7 @@ app = App("anarci", image=image)
     timeout=60 * 15,
     # mounts removed
 )
-def anarci(input_str: str, params: str = None) -> list[tuple[str, bytes]]:
+def anarci(input_str: str, params: str | None = None) -> list[tuple[str, bytes]]:
     """Runs ANARCI on a given FASTA sequence string using specified parameters.
 
     Args:
@@ -78,15 +81,15 @@ def anarci(input_str: str, params: str = None) -> list[tuple[str, bytes]]:
                  # If ANARCI puts files in "IMGT_output/A.csv", this will return "A.csv".
                  # The main function will then save it as out_dir_full / "A.csv".
                 output_files.append((out_file_path.name, out_file_path.read_bytes()))
-        
+
         return output_files
 
 
 @app.local_entrypoint()
 def main(
     input_fasta: str,
-    params: str = None,
-    run_name: str = None,
+    params: str | None = None,
+    run_name: str | None = None,
     out_dir: str = "./out/anarci",
 ):
     """Local entrypoint to run ANARCI via Modal.

@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Ranks protein structures using AF2Rank/ColabDesign.
 
 This script provides a Modal app to run AF2Rank, a method for ranking protein structures
@@ -404,10 +410,9 @@ def run_af2rank(
     import json
 
     if pdb_name is None:
-        pdb_name = "out.pdb"
+        pdb_name = "af2rank.pdb"
 
-    Path(in_pdb := "/tmp/in_af2rank/input.pdb")
-    Path(in_pdb).parent.mkdir(parents=True, exist_ok=True)
+    Path(in_pdb := "/tmp/in_af2rank/input.pdb").parent.mkdir(parents=True, exist_ok=True)
     Path(in_pdb).write_text(pdb_str)
 
     Path(out_dir := "/tmp/out_af2rank").mkdir(parents=True, exist_ok=True)
@@ -439,14 +444,14 @@ def run_af2rank(
 def main(
     input_pdb: str,
     chains: str = "A",
-    model_name: str = None,
+    model_name: str | None = None,
     num_recycles: int = 1,
     num_iterations: int = 1,
     mask_sequence: bool = False,
     mask_sidechains: bool = False,
     mask_interchain: bool = False,
-    out_dir="./out/af2rank",
-    run_name=None,
+    out_dir: str ="./out/af2rank",
+    run_name: str | None = None,
 ):
     """Local entrypoint for the Modal app to run AF2Rank.
 
@@ -496,4 +501,4 @@ def main(
     for out_file, out_content in outputs:
         (Path(out_dir_full) / out_file).parent.mkdir(parents=True, exist_ok=True)
         with open((Path(out_dir_full) / out_file), "wb") as out:
-            out.write(out_content or "")
+            out.write(out_content)

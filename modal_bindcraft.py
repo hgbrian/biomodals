@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Runs the BindCraft protein binder design pipeline on Modal.
 
 Adapting:

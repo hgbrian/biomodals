@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Runs DiffDock for molecular docking using a diffusion model on Modal.
 
 # DiffDock
@@ -24,14 +30,10 @@ from pathlib import Path
 from warnings import warn
 
 import modal
-from modal import App, Image, Mount
+from modal import App, Image
 
-LOCAL_IN = "./in/diffdock"
-REMOTE_IN = "/in"
-
-GPU_SIZE = os.environ.get("GPU_SIZE", "80GB")
-GPU = modal.gpu.A100(size=GPU_SIZE)
-TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
+GPU = os.environ.get("GPU", "A100")
+TIMEOUT = int(os.environ.get("TIMEOUT", 15))
 
 app = App()
 
@@ -79,28 +81,25 @@ image = (
 @app.function(
     image=image,
     gpu=GPU,
-    timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
+    timeout=TIMEOUT * 60,
 )
-def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
+def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> list:
     """Runs DiffDock inference for a list of protein PDB and ligand MOL2 file pairs.
 
     Args:
-        pdbs_ligands (list[tuple[str, str]]): A list of tuples, where each tuple contains
-                                              the path to a protein PDB file and a ligand MOL2 file.
-                                              Paths should be relative to `LOCAL_IN` if local,
-                                              or absolute within the Modal container.
+        pdbs_ligands (list[tuple[str, str, str, str]]): A list of tuples, where each tuple contains
+                                                        (pdb_name, pdb_content, ligand_name, ligand_content).
         batch_size (int): Batch size for DiffDock inference. Defaults to 5.
                           Note: Only 1, 5, or 10 have been tested.
 
     Returns:
-        list[tuple[Path, Path, str, bytes]]: A list of tuples, where each tuple contains
-                                             the input PDB path (as Path object relative to `LOCAL_IN`),
-                                             input ligand path (as Path object relative to `LOCAL_IN`),
-                                             output filename, and its byte content.
+        list[tuple[str, str, str, bytes]]: A list of tuples, where each tuple contains
+                                           the input PDB name, input ligand name,
+                                           output filename, and its byte content.
     """
     import os
     from subprocess import run
+    from tempfile import TemporaryDirectory
 
     os.chdir("/DiffDock")
 
@@ -108,31 +107,40 @@ def run_diffdock(pdbs_ligands: list, batch_size: int = 5) -> dict:
         warn("batch_size only tested with 1, 5, or 10. This may not work.")
 
     outputs = []
-    for pdb, ligand in pdbs_ligands:
-        _pdb, _ligand = (
-            Path(pdb).relative_to(LOCAL_IN),
-            Path(ligand).relative_to(LOCAL_IN),
-        )
-        remote_pdb, remote_ligand = Path(REMOTE_IN) / _pdb, Path(REMOTE_IN) / _ligand
-        out_dir = f"./out_{_pdb.stem}_{_ligand.stem}"
 
-        run(
-            "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && "
-            f"python -m inference"
-            f" --protein_path {remote_pdb}"
-            f" --batch_size {batch_size}"
-            f" --ligand {remote_ligand}"
-            f" --out_dir {out_dir}",
-            shell=True,
-        )
+    with TemporaryDirectory() as temp_dir:
+        for pdb_name, pdb_content, ligand_name, ligand_content in pdbs_ligands:
+            # Write input files to temp directory
+            pdb_path = Path(temp_dir) / pdb_name
+            ligand_path = Path(temp_dir) / ligand_name
 
-        outputs.extend(
-            [
-                (_pdb, _ligand, out_file.name, open(out_file, "rb").read())
-                for out_file in Path(out_dir).glob("**/*.*")
-                if os.path.isfile(out_file)
-            ]
-        )
+            with open(pdb_path, "w") as f:
+                f.write(pdb_content)
+            with open(ligand_path, "w") as f:
+                f.write(ligand_content)
+
+            pdb_stem = Path(pdb_name).stem
+            ligand_stem = Path(ligand_name).stem
+            out_dir = f"./out_{pdb_stem}_{ligand_stem}"
+
+            run(
+                "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && "
+                f"python -m inference"
+                f" --protein_path {pdb_path}"
+                f" --batch_size {batch_size}"
+                f" --ligand {ligand_path}"
+                f" --out_dir {out_dir}",
+                shell=True,
+                check=True,
+            )
+
+            outputs.extend(
+                [
+                    (pdb_name, ligand_name, out_file.name, open(out_file, "rb").read())
+                    for out_file in Path(out_dir).glob("**/*.*")
+                    if os.path.isfile(out_file)
+                ]
+            )
 
     return outputs
 
@@ -160,21 +168,32 @@ def main(
     """
     from datetime import datetime
 
-    pdbs_ligands = [
-        (_pdb.strip(), _mol2.strip())
-        for _pdb, _mol2 in zip(pdb_file.split(","), mol2_file.split(","))
-    ]
+    # Read file contents and prepare for remote execution
+    pdb_files = [path.strip() for path in pdb_file.split(",")]
+    mol2_files = [path.strip() for path in mol2_file.split(",")]
+
+    pdbs_ligands = []
+    for pdb_path, mol2_path in zip(pdb_files, mol2_files):
+        with open(pdb_path, "r") as f:
+            pdb_content = f.read()
+        with open(mol2_path, "r") as f:
+            mol2_content = f.read()
+
+        pdb_name = Path(pdb_path).name
+        mol2_name = Path(mol2_path).name
+
+        pdbs_ligands.append((pdb_name, pdb_content, mol2_name, mol2_content))
 
     outputs = run_diffdock.remote(pdbs_ligands, batch_size)
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+    out_dir_full = Path(out_dir) / (run_name or today)
 
-    for pdb, ligand, out_file, out_content in outputs:
+    for pdb_name, ligand_name, out_file, out_content in outputs:
         output_path = (
-            Path(out_dir)
-            / (run_name or today)
-            / Path(f"{pdb}_{ligand}")
-            / Path(out_file)
+            out_dir_full
+            / f"{Path(pdb_name).stem}_{Path(ligand_name).stem}"
+            / out_file
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if out_content:

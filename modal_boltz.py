@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Runs Boltz-1x for protein structure and complex prediction on Modal.
 
 Boltz-1x: https://github.com/jwohlwend/boltz

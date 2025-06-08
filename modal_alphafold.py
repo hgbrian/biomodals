@@ -1,5 +1,12 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Runs AlphaFold2 or AF2-multimer predictions using ColabFold on Modal.
 
+Limitations:
 - It requires only one entry in a fasta file.
 - If providing a complex, e.g., a binder and target pair,
   Provide the target first, then N binders after, separated by ":"
@@ -8,13 +15,10 @@
 import os
 from pathlib import Path
 
-from modal import App, Image, Mount
+from modal import App, Image
 
-GPU = os.environ.get("GPU", "L40S")
-TIMEOUT = os.environ.get("TIMEOUT", 20 * 60)
-LOCAL_MSA_DIR = "msas"
-if not Path(LOCAL_MSA_DIR).exists():
-    Path(LOCAL_MSA_DIR).mkdir(exist_ok=True)
+GPU = os.environ.get("GPU", "A10G")
+TIMEOUT = os.environ.get("TIMEOUT", 20)
 
 image = (
     Image.debian_slim(python_version="3.11")
@@ -27,8 +31,8 @@ image = (
         "kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"]
     )
     .run_commands(
-        'pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
-        gpu="a100",
+        'pip install --upgrade "jax[cuda12_pip]<0.6.0" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
+        gpu="a10g",
     )
     .run_commands("python -m colabfold.download")
 )
@@ -119,13 +123,12 @@ def score_af2m_binding(af2m_dict: dict, target_len: int, binders_len: list[int])
 @app.function(
     image=image,
     gpu=GPU,
-    timeout=TIMEOUT,
-    mounts=[Mount.from_local_dir(LOCAL_MSA_DIR, remote_path="/msas")],
+    timeout=TIMEOUT * 60,
 )
 def alphafold(
     fasta_name: str,
     fasta_str: str,
-    models: list[int] = None,
+    models: list[int] | None = None,
     num_recycles: int = 3,
     num_relax: int = 0,
     use_templates: bool = False,
@@ -237,13 +240,14 @@ def alphafold(
 @app.local_entrypoint()
 def main(
     input_fasta: str,
-    models: list[int] = None,
+    models: str | None = None,
     num_recycles: int = 1,
     num_relax: int = 0,
     out_dir: str = ".",
     use_templates: bool = False,
     use_precomputed_msas: bool = False,
     return_all_files: bool = False,
+    run_name: str | None = None,
 ):
     """Local entrypoint for running AlphaFold2 predictions.
 
@@ -287,7 +291,7 @@ def main(
     )
 
     today = datetime.now().strftime("%Y%m%d%H%M")[2:]
-    out_dir_full = Path(out_dir) / today
+    out_dir_full = Path(out_dir) / (run_name or today)
 
     for out_file, out_content in outputs:
         (Path(out_dir_full) / Path(out_file)).parent.mkdir(parents=True, exist_ok=True)

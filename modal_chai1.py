@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "modal>=1.0",
+# ]
+# ///
 """Runs Chai-1, a protein-ligand co-folding model, on Modal.
 
 Chai-1r: https://github.com/chaidiscovery/chai-lab
@@ -33,30 +39,32 @@ def download_models():
         None
     """
     import torch
+    from tempfile import TemporaryDirectory
     from chai_lab.chai1 import run_inference
 
-    with open("/tmp/tmp.faa", "w") as out:
-        out.write(
-            ">protein|name=pro\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSL\n"
-            ">ligand|name=lig\nCC\n"
-        )
+    with TemporaryDirectory() as td_in, TemporaryDirectory() as td_out:
+        with open(f"{td_in}/tmp.faa", "w") as out:
+            out.write(
+                ">protein|name=pro\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSL\n"
+                ">ligand|name=lig\nCC\n"
+            )
 
-    _ = run_inference(
-        fasta_file=Path("/tmp/tmp.faa"),
-        output_dir=Path("/tmp"),
-        num_trunk_recycles=1,
-        num_diffn_timesteps=10,
-        seed=1,
-        device=torch.device("cuda:0"),
-        use_esm_embeddings=True,
-    )
+        _ = run_inference(
+            fasta_file=Path(f"{td_in}/tmp.faa"),
+            output_dir=Path(f"{td_out}"),
+            num_trunk_recycles=1,
+            num_diffn_timesteps=10,
+            seed=1,
+            device=torch.device("cuda:0"),
+            use_esm_embeddings=True,
+        )
 
 
 image = (
     Image.debian_slim()
     .apt_install("wget")
     .pip_install("uv")
-    .run_commands("uv pip install --system --compile-bytecode chai_lab")
+    .run_commands("uv pip install --system --compile-bytecode chai_lab==0.6.1")
     .run_function(download_models, gpu="a100")
 )
 
@@ -91,38 +99,37 @@ def chai1(
                                   output file path and its byte content.
     """
     import torch
+    from tempfile import TemporaryDirectory
     from chai_lab.chai1 import run_inference
 
-    Path(in_dir := "/tmp/in_chai1").mkdir(parents=True, exist_ok=True)
-    Path(out_dir := "/tmp/out_chai1").mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory() as td_in, TemporaryDirectory() as td_out:
+        fasta_path = Path(td_in) / input_faa_name
+        fasta_path.write_text(input_faa_str)
 
-    fasta_path = Path(in_dir) / input_faa_name
-    fasta_path.write_text(input_faa_str)
+        _ = run_inference(
+            fasta_file=Path(fasta_path),
+            output_dir=Path(td_out),
+            num_trunk_recycles=num_trunk_recycles,
+            num_diffn_timesteps=num_diffn_timesteps,
+            seed=seed,
+            device=torch.device("cuda:0"),
+            use_esm_embeddings=use_esm_embeddings,
+            **chai1_kwargs,
+        )
 
-    _ = run_inference(
-        fasta_file=Path(fasta_path),
-        output_dir=Path(out_dir),
-        num_trunk_recycles=num_trunk_recycles,
-        num_diffn_timesteps=num_diffn_timesteps,
-        seed=seed,
-        device=torch.device("cuda:0"),
-        use_esm_embeddings=use_esm_embeddings,
-        **chai1_kwargs,
-    )
-
-    return [
-        (out_file.relative_to(out_dir), open(out_file, "rb").read())
-        for out_file in Path(out_dir).glob("**/*")
-        if Path(out_file).is_file()
-    ]
+        return [
+            (out_file.relative_to(td_out), open(out_file, "rb").read())
+            for out_file in Path(td_out).glob("**/*")
+            if Path(out_file).is_file()
+        ]
 
 
 @app.local_entrypoint()
 def main(
     input_faa: str,
     out_dir: str = "./out/chai1",
-    run_name: str = None,
-    chai1_kwargs: str = None,
+    run_name: str | None = None,
+    chai1_kwargs: str | None = None,
 ):
     """Local entrypoint for running Chai-1 predictions using Modal.
 
