@@ -123,8 +123,8 @@ Minimal hello world app, with conda and nextflow installed (not trivial!)
 modal run modal_nextflow_example.py
 ```
 
-# Boltz-1
-[Boltz-1](https://github.com/jwohlwend/boltz), an open source AlphaFold 3-like model.
+# Boltz
+[Boltz](https://github.com/jwohlwend/boltz), an open source AlphaFold 3-like model.
 ```
 echo "sequences:\n    - protein:\n        id: A\n        sequence: TDKLIFGKGTRVTVEP" > test_boltz.yaml
 modal run modal_boltz.py --input-yaml test_boltz.yaml
