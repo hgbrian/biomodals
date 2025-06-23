@@ -155,6 +155,9 @@ wget https://files.rcsb.org/download/1IVO.pdb
 modal run modal_ligandmpnn.py --input-pdb 1IVO.pdb --extract-chains AC --params-str '--seed 1 --checkpoint_protein_mpnn "/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"  --chains_to_design "C" --save_stats 1'
 ```
 
+## RFDiffusion
+Not working currently due to library incompatibilities!
+
 ## Other modal repos
 
 - [RNA Seq Pipeline](https://github.com/tdsone/modal-rna-seq-pipeline) by @tdsone
