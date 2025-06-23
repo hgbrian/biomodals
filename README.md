@@ -7,6 +7,18 @@ pip install modal
 python3 -m modal setup
 ```
 
+Or alternatively, use uv:
+```
+uv run --with modal modal run modal_minimap.py
+```
+
+## AF2Rank
+
+```
+wget https://files.rcsb.org/download/1YWI.pdb
+modal run modal_af2rank.py --input-pdb 1YWI.pdb --run-name 1YWI
+```
+
 ## OmegaFold
 
 Runs `omegafold --model 2 <fasta>`
@@ -14,7 +26,8 @@ Runs `omegafold --model 2 <fasta>`
 This can run out of memory, and may need an 80GB A100.
 
 ```
-modal run modal_omegafold.py --input-fasta in/omegafold/insulin.faa
+wget https://www.rcsb.org/fasta/entry/3NIT -O 3NIT.faa
+modal run modal_omegafold.py --input-fasta 3NIT.faa
 ```
 
 ## minimap2 (short reads example)
@@ -24,7 +37,16 @@ Runs `minimap2 -ax sr <fasta> <reads>`
 Just a simple example of running a binary on a powerful box.
 
 ```
-modal run modal_minimap2.py --input-fasta in/minimap2/mito.fasta --input-reads in/minimap2/reads.fastq
+wget https://gist.githubusercontent.com/hgbrian/56787d9b3ce2e68f698ac94d537340d8/raw/mito.fasta
+wget https://gist.githubusercontent.com/hgbrian/802d8094bb4fed435bbb93a8c9092ee2/raw/mito_reads.fastq
+modal run modal_minimap2.py --input-ref-fasta mito.fasta --input-reads-fastq mito_reads.fastq
+```
+
+## AlphaFold-Multimer
+A very basic implementation.
+```
+wget https://www.rcsb.org/fasta/entry/3NIT -O 3NIT.faa
+modal run modal_alphafold.py --input-fasta 3NIT.faa
 ```
 
 ## AFDesign
@@ -56,7 +78,18 @@ Dock a .mol2 file against a local pdb file.
 DiffDock may require an 80GB A100 to run for larger proteins.
 
 ```
-modal run modal_diffdock.py --pdb in/diffdock/1igy.pdb --mol2 in/diffdock/1igy.mol2
+wget https://files.rcsb.org/download/1IGY.pdb
+wget https://gist.github.com/hgbrian/393ec799893cbf518f3084847c17cb2d/raw/1IGY_example.mol2
+modal run modal_diffdock.py --pdb 1IGY.pdb --mol2 in/diffdock/1IGY_example.mol2
+```
+
+## ESM2
+
+Predict the amino acid at a masked position in a sequence.
+
+```
+echo ">1\nMA<mask>GMT" > test_esm2.faa
+modal run modal_esm2_predict_masked.py --input-faa test_esm2.faa
 ```
 
 ## pdb2png
@@ -64,7 +97,8 @@ modal run modal_diffdock.py --pdb in/diffdock/1igy.pdb --mol2 in/diffdock/1igy.m
 A simple pymol-based script to convert PDBs to PNGs for easy output viewing.
 
 ```
-modal run modal_pdb2png.py --input-pdb in/pdb2png/1igy.pdb --protein-zoom 0.8 --protein-color 240,200,190
+wget https://files.rcsb.org/download/1YWI.pdb
+modal run modal_pdb2png.py --input-pdb 1YWI.pdb --protein-zoom 0.8 --protein-color 240,200,190
 ```
 
 ## ANARCI
@@ -112,6 +146,13 @@ modal run modal_boltz.py --input-yaml test_boltz.yaml
 ```
 echo ">protein|name=insulin\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS\n>RNA|name=rna\nACUGACUGGAAGUCCCCCGUAGUACCCGACG\n>ligand|name=caffeine\nN[C@@H](Cc1ccc(O)cc1)C(=O)O" > test_chai1.faa
 modal run modal_chai1.py --input-faa test_chai1.faa
+```
+
+## LigandMPNN
+
+```
+wget https://files.rcsb.org/download/1IVO.pdb
+modal run modal_ligandmpnn.py --input-pdb 1IVO.pdb --extract-chains AC --params-str '--seed 1 --checkpoint_protein_mpnn "/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"  --chains_to_design "C" --save_stats 1'
 ```
 
 ## Other modal repos
