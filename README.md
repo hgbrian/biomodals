@@ -19,17 +19,6 @@ wget https://files.rcsb.org/download/1YWI.pdb
 modal run modal_af2rank.py --input-pdb 1YWI.pdb --run-name 1YWI
 ```
 
-## OmegaFold
-
-Runs `omegafold --model 2 <fasta>`
-
-This can run out of memory, and may need an 80GB A100.
-
-```
-wget https://www.rcsb.org/fasta/entry/3NIT -O 3NIT.faa
-modal run modal_omegafold.py --input-fasta 3NIT.faa
-```
-
 ## minimap2 (short reads example)
 
 Runs `minimap2 -ax sr <fasta> <reads>`
