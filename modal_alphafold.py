@@ -21,17 +21,16 @@ GPU = os.environ.get("GPU", "A10G")
 TIMEOUT = os.environ.get("TIMEOUT", 20)
 
 image = (
-    Image.debian_slim(python_version="3.11")
-    .micromamba()
+    Image.micromamba(python_version="3.11")
     .apt_install("wget", "git")
     .pip_install(
-        "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold"
+        "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold@a134f6a8f8de5c41c63cb874d07e1a334cb021bb"
     )
     .micromamba_install(
         "kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"]
     )
     .run_commands(
-        'pip install --upgrade "jax[cuda12_pip]<0.6.0" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
+        'pip install --upgrade "jax[cuda12_pip]==0.5.3" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
         gpu="a10g",
     )
     .run_commands("python -m colabfold.download")
