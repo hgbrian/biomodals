@@ -39,7 +39,9 @@ image = (
 app = App("alphafold", image=image)
 
 
-def score_af2m_binding(af2m_dict: dict, target_len: int, binders_len: list[int]) -> dict:
+def score_af2m_binding(
+    af2m_dict: dict, target_len: int, binders_len: list[int]
+) -> dict:
     """Calculates binding scores from AlphaFold2 multimer prediction results.
 
     The target is assumed to be the first part of the sequence, followed by one or more binders.
@@ -184,6 +186,8 @@ def alphafold(
 
     queries, is_complex = get_queries(in_dir)
 
+    os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
     run(
         queries=queries,
         result_dir=out_dir,
@@ -242,7 +246,7 @@ def main(
     models: str | None = None,
     num_recycles: int = 1,
     num_relax: int = 0,
-    out_dir: str = ".",
+    out_dir: str = "./out/alphafold",
     use_templates: bool = False,
     use_precomputed_msas: bool = False,
     return_all_files: bool = False,
