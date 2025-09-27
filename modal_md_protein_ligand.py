@@ -3,11 +3,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Union
 
-from modal import App, Image, Mount
+from modal import App, Image
 
 FORCE_BUILD = False
-LOCAL_IN = "./in/md_protein_ligand"
-REMOTE_IN = "/in"
 GPU = os.environ.get("MODAL_GPU", "T4")  # T4 for testing
 TIMEOUT_MINS = int(os.environ.get("TIMEOUT_MINS", 15))
 
@@ -35,6 +33,7 @@ image = (
         ],
         channels=["omnia", "plotly", "conda-forge"],
     )
+    .add_local_python_source("MD_protein_ligand")
     # maybe replace with local? i am not sure
     # .pip_install("git+https://github.com/hgbrian/MD_protein_ligand", force_build=FORCE_BUILD)
     # .run_commands("python -c 'from MD_protein_ligand import simulate'")
@@ -48,10 +47,10 @@ with image.imports():
     image=image,
     gpu=GPU,
     timeout=60 * TIMEOUT_MINS,
-    mounts=[Mount.from_local_dir(LOCAL_IN, remote_path=REMOTE_IN)],
 )
 def simulate_md_ligand(
     pdb_id: str,
+    pdb_content: str | None,
     ligand_id: str,
     ligand_chain: str,
     use_pdb_redo: bool,
@@ -66,15 +65,20 @@ def simulate_md_ligand(
 ):
     """MD simulation of protein + ligand"""
 
-    if pdb_id.endswith(".pdb"):
-        pdb_file_remote = str(Path(REMOTE_IN) / Path(pdb_id).relative_to(LOCAL_IN))
-        pdb_id = Path(pdb_id).stem
+    # If pdb_content is provided, write it to a temporary file
+    if pdb_content is not None:
+        pdb_file_remote = f"/tmp/{pdb_id}.pdb"
+        with open(pdb_file_remote, "w") as f:
+            f.write(pdb_content)
     else:
         pdb_file_remote = None
-        pdb_id = pdb_id
 
-    out_dir = str(Path(out_dir_root) / (f"{pdb_id}_{ligand_id}" if ligand_id else f"{pdb_id}"))
-    out_stem = str(Path(out_dir) / (f"{pdb_id}_{ligand_id}" if ligand_id else f"{pdb_id}"))
+    out_dir = str(
+        Path(out_dir_root) / (f"{pdb_id}_{ligand_id}" if ligand_id else f"{pdb_id}")
+    )
+    out_stem = str(
+        Path(out_dir) / (f"{pdb_id}_{ligand_id}" if ligand_id else f"{pdb_id}")
+    )
 
     #
     # Mutate a residue and relax again.
@@ -131,7 +135,7 @@ def main(
     """
     MD simulation of protein + ligand.
 
-    :param pdb_id: String representing the PDB ID of the protein.
+    :param pdb_id: String representing the PDB ID of the protein, or path to a local PDB file.
     :param ligand_id: String representing the ligand ID (ID in PDB file).
     :param ligand_chain: String representing the ligand chain.
         You have to explicitly specify the chain, because otherwise >1 ligands can be merged!
@@ -152,8 +156,16 @@ def main(
     if ligand_id is not None:
         assert ligand_chain is not None
 
+    # Read PDB file content if a file path is provided
+    pdb_content = None
+    if pdb_id.endswith(".pdb") and Path(pdb_id).exists():
+        with open(pdb_id, "r") as f:
+            pdb_content = f.read()
+        pdb_id = Path(pdb_id).stem
+
     outputs = simulate_md_ligand.remote(
         pdb_id,
+        pdb_content,
         ligand_id,
         ligand_chain,
         use_pdb_redo,

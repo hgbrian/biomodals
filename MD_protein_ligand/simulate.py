@@ -60,8 +60,12 @@ SOLVENT_PADDING = 10.0 * unit.angstroms
 BAROSTAT_PRESSURE = 1.0 * unit.atmospheres
 BAROSTAT_FREQUENCY = 25
 # "hydrogen-involving bond constraints" is recommended
-FORCEFIELD_KWARGS = {'constraints': app.HBonds, 'rigidWater': True,
-                     'removeCMMotion': False, 'hydrogenMass': 4*unit.amu}
+FORCEFIELD_KWARGS = {
+    "constraints": app.HBonds,
+    "rigidWater": True,
+    "removeCMMotion": False,
+    "hydrogenMass": 4 * unit.amu,
+}
 FORCEFIELD_PROTEIN = "amber/ff14SB.xml"
 FORCEFIELD_IMPLICIT_SOLVENT = "implicit/obc2.xml"
 FORCEFIELD_SOLVENT = "amber/tip3p_standard.xml"
@@ -72,12 +76,13 @@ FORCEFIELD_SMALL_MOLECULE = "gaff-2.11"
 OPENMM_DEFAULT_LIGAND_ID = "UNK"
 
 
-def _download_binary_if_missing(binary_name:str):
+def _download_binary_if_missing(binary_name: str):
     """Downloads a binary if it's not found locally.
 
     Args:
         binary_name (str): The name of the binary to check and download (e.g., "gnina").
     """
+
     def _download(path, url):
         """Helper function to download a file from a URL.
 
@@ -92,7 +97,7 @@ def _download_binary_if_missing(binary_name:str):
         with requests.get(url, timeout=600, stream=True) as r:
             r.raise_for_status()
             os.makedirs(Path(path).parent, exist_ok=True)
-            with open(path, 'wb') as f:
+            with open(path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):
                     f.write(chunk)
         os.chmod(path, 0o755)
@@ -101,6 +106,7 @@ def _download_binary_if_missing(binary_name:str):
 
     if binary_name == GNINA and not Path(GNINA_BIN).exists():
         _download(GNINA_BIN, GNINA_LINUX_URL)
+
 
 _download_binary_if_missing(GNINA)
 
@@ -112,18 +118,24 @@ def get_platform():
         openmm.Platform: The fastest available OpenMM platform, configured for mixed precision if GPU.
     """
 
-    platform = max((Platform.getPlatform(i) for i in range(Platform.getNumPlatforms())),
-                    key=lambda p: p.getSpeed())
+    platform = max(
+        (Platform.getPlatform(i) for i in range(Platform.getNumPlatforms())),
+        key=lambda p: p.getSpeed(),
+    )
 
-    if platform.getName() == 'CUDA' or platform.getName() == 'OpenCL':
-        platform.setPropertyDefaultValue('Precision', 'mixed')
+    if platform.getName() == "CUDA" or platform.getName() == "OpenCL":
+        platform.setPropertyDefaultValue("Precision", "mixed")
         print(f"Set precision for platform {platform.getName()} to mixed\n")
 
     return platform
 
 
-def prepare_protein(in_pdb_file:str, out_pdb_file:str, minimize_pdb:bool=False,
-                    mutations:list|None=None) -> bool:
+def prepare_protein(
+    in_pdb_file: str,
+    out_pdb_file: str,
+    minimize_pdb: bool = False,
+    mutations: list | None = None,
+) -> bool:
     """
     Prepare a protein for simulation using PDBFixer and optionally minimize it using OpenMM.
 
@@ -148,31 +160,33 @@ def prepare_protein(in_pdb_file:str, out_pdb_file:str, minimize_pdb:bool=False,
 
     fixer = PDBFixer(filename=in_pdb_file)
     for mutation in mutations or []:
-        mutation = mutation.split('-')
-        for chain in mutation[3]: # e.g., AB
+        mutation = mutation.split("-")
+        for chain in mutation[3]:  # e.g., AB
             fixer.applyMutations([f"{mutation[0]}-{mutation[1]}-{mutation[2]}"], chain)
     fixer.findMissingResidues()
     fixer.findMissingAtoms()
     fixer.findNonstandardResidues()
 
-    print(f"# Preparing protein:\n"
-          f"- Missing residues: {fixer.missingResidues}\n"
-          f"- Atoms: {fixer.missingAtoms}\n"
-          f"- Terminals: {fixer.missingTerminals}\n"
-          f"- Non-standard: {fixer.nonstandardResidues}\n")
+    print(
+        f"# Preparing protein:\n"
+        f"- Missing residues: {fixer.missingResidues}\n"
+        f"- Atoms: {fixer.missingAtoms}\n"
+        f"- Terminals: {fixer.missingTerminals}\n"
+        f"- Non-standard: {fixer.nonstandardResidues}\n"
+    )
 
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(PDB_PH)
     fixer.removeHeterogens(keepWater=False)
 
     for res in fixer.topology.residues():
-        if res.name == 'DMS':
+        if res.name == "DMS":
             warn("DMSO found in PDB file. Maybe remove?")
 
     # Note in the process of adding missing residues, some weird proteins are created
     # .e.g, the PDB file could list the first N residues, but have no co-ordinates
     # Then some combination of PDBFixer and openmm place these residues but in a straight line
-    with open(out_pdb_file, 'w', encoding='utf-8') as out:
+    with open(out_pdb_file, "w", encoding="utf-8") as out:
         PDBFile.writeFile(fixer.topology, fixer.positions, file=out, keepIds=True)
 
     if minimize_pdb is True:
@@ -183,23 +197,32 @@ def prepare_protein(in_pdb_file:str, out_pdb_file:str, minimize_pdb:bool=False,
         simulation.context.setPositions(fixer.positions)
         simulation.minimizeEnergy()
 
-        with open(f"{Path(out_pdb_file).with_suffix('')}_minimized_no_ligand.pdb", 'w',
-                  encoding='utf-8') as out:
-            PDBFile.writeFile(fixer.topology,
-                              simulation.context.getState(getPositions=True, enforcePeriodicBox=False).getPositions(),
-                              file=out,
-                              keepIds=True)
+        with open(
+            f"{Path(out_pdb_file).with_suffix('')}_minimized_no_ligand.pdb",
+            "w",
+            encoding="utf-8",
+        ) as out:
+            PDBFile.writeFile(
+                fixer.topology,
+                simulation.context.getState(
+                    getPositions=True, enforcePeriodicBox=False
+                ).getPositions(),
+                file=out,
+                keepIds=True,
+            )
 
     return True
 
 
-def get_pdb_and_extract_ligand(pdb_id:str,
-                               ligand_id:str|None=None,
-                               ligand_chain:str|None=None,
-                               out_dir:str='.',
-                               use_pdb_redo:bool=False,
-                               minimize_pdb:bool=False,
-                               mutations:list|None=None) -> dict:
+def get_pdb_and_extract_ligand(
+    pdb_id: str,
+    ligand_id: str | None = None,
+    ligand_chain: str | None = None,
+    out_dir: str = ".",
+    use_pdb_redo: bool = False,
+    minimize_pdb: bool = False,
+    mutations: list | None = None,
+) -> dict:
     """
     Downloads a PDB file, prepares it for MD, and extracts a specified ligand.
 
@@ -233,31 +256,46 @@ def get_pdb_and_extract_ligand(pdb_id:str,
         pdb_id = Path(pdb_id).stem
     elif use_pdb_redo:
         pdb_file = str(Path(out_dir) / f"{pdb_id}_pdbredo.pdb")
-        subprocess.run(f"wget -O {pdb_file} https://pdb-redo.eu/db/{pdb_id}/{pdb_id}_final.pdb",
-                       check=True, shell=True, capture_output=True)
+        subprocess.run(
+            f"wget -O {pdb_file} https://pdb-redo.eu/db/{pdb_id}/{pdb_id}_final.pdb",
+            check=True,
+            shell=True,
+            capture_output=True,
+        )
     else:
         pdb_file = str(Path(out_dir) / f"{pdb_id}.pdb")
-        subprocess.run(f"wget -O {pdb_file} https://files.rcsb.org/download/{pdb_id}.pdb",
-                       check=True, shell=True, capture_output=True)
+        subprocess.run(
+            f"wget -O {pdb_file} https://files.rcsb.org/download/{pdb_id}.pdb",
+            check=True,
+            shell=True,
+            capture_output=True,
+        )
 
     # FIXFIX is it ok to prepare_protein BEFORE extracting the ligand?
     prepared_pdb_file = str(Path(out_dir) / f"{pdb_id}_fixed.pdb")
-    prepare_protein(pdb_file, prepared_pdb_file, minimize_pdb=minimize_pdb, mutations=mutations)
+    prepare_protein(
+        pdb_file, prepared_pdb_file, minimize_pdb=minimize_pdb, mutations=mutations
+    )
 
-    if ligand_id is None: # then extract nothing, just prepare the protein
+    if ligand_id is None:  # then extract nothing, just prepare the protein
         return {"original_pdb": pdb_file, "pdb": prepared_pdb_file}
 
     # _out_pdb_file is just the protein selection (not prepared for openmm)
     out_sdf_file = str(Path(out_dir) / f"{pdb_id}_{ligand_id}.sdf")
-    _, _, out_sdf_smiles = extract_ligand(pdb_file, ligand_id, ligand_chain,
-                                          out_pdb_file=None,
-                                          out_sdf_file=out_sdf_file)
+    _, _, out_sdf_smiles = extract_ligand(
+        pdb_file, ligand_id, ligand_chain, out_pdb_file=None, out_sdf_file=out_sdf_file
+    )
 
-    return {"original_pdb": pdb_file, "pdb": prepared_pdb_file,
-            "sdf": out_sdf_file, "smi": out_sdf_smiles}
+    return {
+        "original_pdb": pdb_file,
+        "pdb": prepared_pdb_file,
+        "sdf": out_sdf_file,
+        "smi": out_sdf_smiles,
+    }
 
 
-def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
+def make_decoy(reference_rmol, decoy_smiles, num_conformers=100):
+    """
     Generates a 3D conformer for a decoy molecule that best matches a reference molecule.
 
     The decoy molecule is generated from a SMILES string, and multiple conformers are
@@ -283,7 +321,7 @@ def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
     decoy_rmol = Chem.AddHs(decoy_rmol)
 
     # Generate conformers
-    #AllChem.EmbedMolecule(decoy_rmol) # pretty sure this is unnecessary given EmbedMultipleConfs
+    # AllChem.EmbedMolecule(decoy_rmol) # pretty sure this is unnecessary given EmbedMultipleConfs
     AllChem.EmbedMultipleConfs(decoy_rmol, numConfs=num_conformers)
 
     # TODO replace below with _transform_conformer_to_match_reference
@@ -299,7 +337,9 @@ def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
         transformation_matrix[:3, 3] = translation
         rdMolTransforms.TransformConformer(conformer, transformation_matrix)
 
-        shape_dist = rdShapeHelpers.ShapeTanimotoDist(reference_rmol, decoy_rmol, confId1=0, confId2=n)
+        shape_dist = rdShapeHelpers.ShapeTanimotoDist(
+            reference_rmol, decoy_rmol, confId1=0, confId2=n
+        )
         if min_shape_dist is None or shape_dist < min_shape_dist:
             best_conformer_n = n
             min_shape_dist = shape_dist
@@ -308,11 +348,15 @@ def make_decoy(reference_rmol, decoy_smiles, num_conformers = 100):
     decoy_mol = Molecule(decoy_rmol)
     best_conformer = decoy_mol.conformers[best_conformer_n]
 
-    print("best conformer??", best_conformer, decoy_rmol.GetConformer(best_conformer_n).GetPositions())
+    print(
+        "best conformer??",
+        best_conformer,
+        decoy_rmol.GetConformer(best_conformer_n).GetPositions(),
+    )
     return decoy_rmol, decoy_mol, best_conformer
 
 
-def prepare_ligand_for_MD(mol_filename:str, is_sanitize:bool=True):
+def prepare_ligand_for_MD(mol_filename: str, is_sanitize: bool = True):
     """
     Prepares a ligand from a file for Molecular Dynamics (MD) simulation.
 
@@ -359,17 +403,26 @@ def prepare_system_generator(ligand_mol=None, use_solvent=False):
     # FIXFIX why is `molecules` not passed for use_solvent=False in tdudgeon/simulateComplex.py?
     # is there any harm if it is?
     system_generator = SystemGenerator(
-        forcefields=([FORCEFIELD_PROTEIN, FORCEFIELD_SOLVENT] if use_solvent else
-                     [FORCEFIELD_PROTEIN, FORCEFIELD_IMPLICIT_SOLVENT]),
+        forcefields=(
+            [FORCEFIELD_PROTEIN, FORCEFIELD_SOLVENT]
+            if use_solvent
+            else [FORCEFIELD_PROTEIN, FORCEFIELD_IMPLICIT_SOLVENT]
+        ),
         small_molecule_forcefield=FORCEFIELD_SMALL_MOLECULE,
         molecules=[ligand_mol] if ligand_mol else [],
-        forcefield_kwargs=FORCEFIELD_KWARGS)
+        forcefield_kwargs=FORCEFIELD_KWARGS,
+    )
 
     return system_generator
 
 
-def analyze_traj(traj_dcd: str, topol_in:str, output_traj_analysis:str,
-                 ligand_chain_id: str = "1", backbone_chain_id: str = "0") -> pd.DataFrame:
+def analyze_traj(
+    traj_dcd: str,
+    topol_in: str,
+    output_traj_analysis: str,
+    ligand_chain_id: str = "1",
+    backbone_chain_id: str = "0",
+) -> pd.DataFrame:
     """Analyzes a trajectory for RMSD of backbone and ligand using MDTraj.
 
     Calculates Root Mean Square Deviation (RMSD) for the ligand and protein backbone
@@ -400,28 +453,40 @@ def analyze_traj(traj_dcd: str, topol_in:str, output_traj_analysis:str,
     traj.save_dcd(traj_dcd)
 
     lig_atoms = traj.topology.select(f"chainid {ligand_chain_id}")
-    rmsds_lig = md.rmsd(traj, traj, frame=0, atom_indices=lig_atoms, parallel=True, precentered=False)
+    rmsds_lig = md.rmsd(
+        traj, traj, frame=0, atom_indices=lig_atoms, parallel=True, precentered=False
+    )
 
     # and backbond constrains it to only the backbone atoms, not sidechains
     bb_atoms = traj.topology.select(f"chainid {backbone_chain_id} and backbone")
-    rmsds_bck = md.rmsd(traj, traj, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False)
+    rmsds_bck = md.rmsd(
+        traj, traj, frame=0, atom_indices=bb_atoms, parallel=True, precentered=False
+    )
 
-    print(f"Topology:\n"
-          f"- {traj.topology} with n_frames={traj.n_frames}\n"
-          f"- {len(lig_atoms)} ligand atoms\n"
-          f"- {len(bb_atoms)} backbone atoms")
+    print(
+        f"Topology:\n"
+        f"- {traj.topology} with n_frames={traj.n_frames}\n"
+        f"- {len(lig_atoms)} ligand atoms\n"
+        f"- {len(bb_atoms)} backbone atoms"
+    )
 
-    df_traj = (pd.DataFrame([traj.time, rmsds_bck, rmsds_lig]).T
-                 .map(lambda x: round(x, 8))
-                 .rename(columns={0:'time', 1:'rmsd_bck', 2:'rmsd_lig'}))
+    df_traj = (
+        pd.DataFrame([traj.time, rmsds_bck, rmsds_lig])
+        .T.map(lambda x: round(x, 8))
+        .rename(columns={0: "time", 1: "rmsd_bck", 2: "rmsd_lig"})
+    )
 
-    df_traj.to_csv(output_traj_analysis, sep='\t', index=False)
+    df_traj.to_csv(output_traj_analysis, sep="\t", index=False)
 
     return df_traj
 
 
-def get_affinity(pdb_in:str, ligand_id:str, convert_to_pdbqt:bool=False,
-                  scoring_tool: str = GNINA) -> float:
+def get_affinity(
+    pdb_in: str,
+    ligand_id: str,
+    convert_to_pdbqt: bool = False,
+    scoring_tool: str = GNINA,
+) -> float:
     """Calculates predicted binding affinity using Gnina or a similar tool.
 
     Extracts protein and ligand from a PDB file, then uses a scoring tool
@@ -442,11 +507,21 @@ def get_affinity(pdb_in:str, ligand_id:str, convert_to_pdbqt:bool=False,
     """
     gnina_affinity_pattern = r"Affinity:\s*([\-\.\d+]+)"
 
-    with (NamedTemporaryFile('w', suffix="_ligand.pdb", delete=False) as gnina_ligand_pdb,
-          NamedTemporaryFile('w', suffix="_protein.pdb", delete=False) as gnina_protein_pdb,
-          NamedTemporaryFile('w', suffix="_protein.pdbqt", delete=False) as gnina_protein_pdbqt):
-        for line in open(pdb_in, encoding='utf-8'):
-            if line.startswith("HETATM") and line[17:20] == ligand_id or line.startswith("CONECT"):
+    with (
+        NamedTemporaryFile("w", suffix="_ligand.pdb", delete=False) as gnina_ligand_pdb,
+        NamedTemporaryFile(
+            "w", suffix="_protein.pdb", delete=False
+        ) as gnina_protein_pdb,
+        NamedTemporaryFile(
+            "w", suffix="_protein.pdbqt", delete=False
+        ) as gnina_protein_pdbqt,
+    ):
+        for line in open(pdb_in, encoding="utf-8"):
+            if (
+                line.startswith("HETATM")
+                and line[17:20] == ligand_id
+                or line.startswith("CONECT")
+            ):
                 gnina_ligand_pdb.write(line)
             elif not line.startswith("HETATM"):
                 gnina_protein_pdb.write(line)
@@ -457,22 +532,28 @@ def get_affinity(pdb_in:str, ligand_id:str, convert_to_pdbqt:bool=False,
 
         # convert pdb to pdbqt too to get flexible side chains? In theory MD sorts this out
         if convert_to_pdbqt:
-            cmd = (f"{binaries[OBABEL]} {gnina_protein_pdb.name} -O {gnina_protein_pdbqt.name} && "
-                   f"{binaries[scoring_tool]} --cpu {max(1, os.cpu_count()-1)} --score_only "
-                   f"-r {gnina_protein_pdbqt.name} -l {gnina_ligand_pdb.name}")
+            cmd = (
+                f"{binaries[OBABEL]} {gnina_protein_pdb.name} -O {gnina_protein_pdbqt.name} && "
+                f"{binaries[scoring_tool]} --cpu {max(1, os.cpu_count() - 1)} --score_only "
+                f"-r {gnina_protein_pdbqt.name} -l {gnina_ligand_pdb.name}"
+            )
         else:
-            cmd = (f"{binaries[scoring_tool]} --cpu {max(1, os.cpu_count()-1)} --score_only "
-                   f"-r {gnina_protein_pdb.name} -l {gnina_ligand_pdb.name}")
+            cmd = (
+                f"{binaries[scoring_tool]} --cpu {max(1, os.cpu_count() - 1)} --score_only "
+                f"-r {gnina_protein_pdb.name} -l {gnina_ligand_pdb.name}"
+            )
 
         print(f"- Calculating score: {cmd}")
-        gnina_out = subprocess.run(cmd, check=True, shell=True, capture_output=True).stdout.decode('ascii')
+        gnina_out = subprocess.run(
+            cmd, check=True, shell=True, capture_output=True
+        ).stdout.decode("ascii")
 
     affinity = float(re.findall(gnina_affinity_pattern, gnina_out)[0])
 
     return affinity
 
 
-def extract_pdbs_from_dcd(complex_pdb:str, trajectory_dcd:str) -> dict:
+def extract_pdbs_from_dcd(complex_pdb: str, trajectory_dcd: str) -> dict:
     """Extracts individual PDB snapshots from a DCD trajectory file.
 
     Uses MDAnalysis to load a trajectory and its corresponding topology (PDB),
@@ -492,18 +573,28 @@ def extract_pdbs_from_dcd(complex_pdb:str, trajectory_dcd:str) -> dict:
     traj_pdbs = {}
     for ts in universe.trajectory:
         time_ps = round(ts.time, 2)
-        traj_pdbs[time_ps] = f"{Path(complex_pdb).parent / Path(complex_pdb).stem}_f{time_ps}.pdb"
+        traj_pdbs[time_ps] = (
+            f"{Path(complex_pdb).parent / Path(complex_pdb).stem}_f{time_ps}.pdb"
+        )
         with PDBWriter(traj_pdbs[time_ps]) as out_pdb:
             out_pdb.write(universe.atoms)
 
     return traj_pdbs
 
 
-def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
-             use_solvent:bool=False, decoy_smiles:Union[str|None]=None, minimize_only:bool=False,
-             temperature: float = PDB_TEMPERATURE,
-             equilibration_steps: int = 200, reporting_interval: Union[int, None] = None,
-             scoring_tool: str = GNINA) -> dict:
+def simulate(
+    pdb_in: str,
+    mol_in: str,
+    output: str,
+    num_steps: int,
+    use_solvent: bool = False,
+    decoy_smiles: Union[str | None] = None,
+    minimize_only: bool = False,
+    temperature: float = PDB_TEMPERATURE,
+    equilibration_steps: int = 200,
+    reporting_interval: Union[int, None] = None,
+    scoring_tool: str = GNINA,
+) -> dict:
     """Runs a molecular dynamics simulation of a protein-ligand complex using OpenMM.
 
     This comprehensive function sets up and runs an MD simulation. It can handle:
@@ -556,9 +647,9 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
         output_state_tsv = f"{output}_state.tsv"
         output_analysis_tsv = f"{output}_analysis.tsv"
     output_args_json = f"{output}_args.json"
-    json.dump(locals(), open(output_args_json, 'w', encoding='utf-8'), indent=2)
+    json.dump(locals(), open(output_args_json, "w", encoding="utf-8"), indent=2)
 
-    out_affinity = open(output_affinity_tsv, 'w', encoding='utf-8')
+    out_affinity = open(output_affinity_tsv, "w", encoding="utf-8")
     out_affinity.write("time_ps\taffinity\n")
 
     if num_steps is None:
@@ -580,9 +671,13 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
         print(f"# Preparing ligand:\n- {mol_in}\n")
         ligand_rmol, ligand_mol = prepare_ligand_for_MD(mol_in)
         ligand_conformer = ligand_mol.conformers[0]
-        assert len(ligand_mol.conformers) == len(ligand_rmol.GetConformers()) == 1, "reference ligand should have one conformer"
+        assert len(ligand_mol.conformers) == len(ligand_rmol.GetConformers()) == 1, (
+            "reference ligand should have one conformer"
+        )
     elif decoy_smiles is not None:
-        ligand_rmol, ligand_mol, ligand_conformer = make_decoy(ligand_rmol, decoy_smiles)
+        ligand_rmol, ligand_mol, ligand_conformer = make_decoy(
+            ligand_rmol, decoy_smiles
+        )
         print(f"# Using decoy:\n- {ligand_mol}\n- {ligand_conformer}\n")
     else:
         ligand_rmol, ligand_mol, ligand_conformer = None, None, None
@@ -608,21 +703,31 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     # modeller.topology.setPeriodicBoxVectors([Vec3(x=8.461, y=0.0, z=0.0),
     # Vec3(x=0.0, y=8.461, z=0.0), Vec3(x=0.0, y=0.0, z=8.461)])
     if ligand_mol is not None:
-        modeller.add(ligand_mol.to_topology().to_openmm(), ligand_mol.conformers[0].to_openmm())
-        print(f"- System has {modeller.topology.getNumAtoms()} atoms after adding ligand")
+        modeller.add(
+            ligand_mol.to_topology().to_openmm(), ligand_mol.conformers[0].to_openmm()
+        )
+        print(
+            f"- System has {modeller.topology.getNumAtoms()} atoms after adding ligand"
+        )
 
     if use_solvent:
         # We use the 'padding' option to define the periodic box. The PDB file does not contain any
         # unit cell information so we just create a box that has a 10A padding around the complex.
-        modeller.addSolvent(system_generator.forcefield, model='tip3p', padding=SOLVENT_PADDING)
-        print(f"- System has {modeller.topology.getNumAtoms()} atoms after adding solvent")
+        modeller.addSolvent(
+            system_generator.forcefield, model="tip3p", padding=SOLVENT_PADDING
+        )
+        print(
+            f"- System has {modeller.topology.getNumAtoms()} atoms after adding solvent"
+        )
 
     # Output the complex with topology
-    with open(output_complex_pdb, 'w', encoding='utf-8') as out:
+    with open(output_complex_pdb, "w", encoding="utf-8") as out:
         PDBFile.writeFile(modeller.topology, modeller.positions, out)
 
     if ligand_mol is not None:
-        affinity = get_affinity(output_complex_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
+        affinity = get_affinity(
+            output_complex_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool
+        )
         out_affinity.write(f"complex\t{affinity:.4f}\n")
 
     system = system_generator.create_system(modeller.topology, molecules=ligand_mol)
@@ -631,10 +736,14 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
 
     # This line is present in the WithSolvent.py version of the script but unclear why
     if use_solvent:
-        system.addForce(MonteCarloBarostat(BAROSTAT_PRESSURE, temperature, BAROSTAT_FREQUENCY))
+        system.addForce(
+            MonteCarloBarostat(BAROSTAT_PRESSURE, temperature, BAROSTAT_FREQUENCY)
+        )
 
-    print(f"- Using Periodic box: {system.usesPeriodicBoundaryConditions()}\n"
-          f"- Default Periodic box: {system.getDefaultPeriodicBoxVectors()}\n")
+    print(
+        f"- Using Periodic box: {system.usesPeriodicBoundaryConditions()}\n"
+        f"- Default Periodic box: {system.getDefaultPeriodicBoxVectors()}\n"
+    )
 
     # -------------------------------------------------------
     # Run simulation
@@ -649,23 +758,30 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     # Write out the minimized PDB.
     # 'enforcePeriodicBox=False' is important otherwise the different components can end up in
     # different periodic boxes resulting in really strange looking output.
-    with open(output_minimized_pdb, 'w', encoding='utf-8') as out:
-        PDBFile.writeFile(modeller.topology,
-                          context.getState(getPositions=True, enforcePeriodicBox=False).getPositions(),
-                          file=out,
-                          keepIds=True)
+    with open(output_minimized_pdb, "w", encoding="utf-8") as out:
+        PDBFile.writeFile(
+            modeller.topology,
+            context.getState(
+                getPositions=True, enforcePeriodicBox=False
+            ).getPositions(),
+            file=out,
+            keepIds=True,
+        )
 
     if ligand_mol is not None:
-        affinity = get_affinity(output_minimized_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
+        affinity = get_affinity(
+            output_minimized_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool
+        )
         out_affinity.write(f"min\t{affinity:.4f}\n")
         out_affinity.flush()
 
     if minimize_only:
-        return {"complex_pdb": output_complex_pdb,
-                "minimized_pdb": output_minimized_pdb,
-                "affinity_tsv": output_affinity_tsv,
-                "args_json": output_args_json
-                }
+        return {
+            "complex_pdb": output_complex_pdb,
+            "minimized_pdb": output_minimized_pdb,
+            "affinity_tsv": output_affinity_tsv,
+            "args_json": output_args_json,
+        }
 
     print("## Equilibrating ...")
     context.setVelocitiesToTemperature(temperature)
@@ -677,11 +793,18 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     # that all parts of the simulation end up in the same periodic box when being output.
     # optional: simulation.reporters.append(PDBReporter(output_traj_pdb, reporting_interval,
     #                                       enforcePeriodicBox=False))
-    simulation.reporters.append(DCDReporter(output_traj_dcd, reporting_interval,
-                                            enforcePeriodicBox=False))
-    simulation.reporters.append(StateDataReporter(output_state_tsv, reporting_interval,
-                                                  step=True, potentialEnergy=True,
-                                                  temperature=True))
+    simulation.reporters.append(
+        DCDReporter(output_traj_dcd, reporting_interval, enforcePeriodicBox=False)
+    )
+    simulation.reporters.append(
+        StateDataReporter(
+            output_state_tsv,
+            reporting_interval,
+            step=True,
+            potentialEnergy=True,
+            temperature=True,
+        )
+    )
 
     print(f"# Starting simulation with {num_steps} steps ...")
     time_0 = time.time()
@@ -695,8 +818,12 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     print("# Calculating affinities along trajectory...")
     traj_pdbs = extract_pdbs_from_dcd(output_complex_pdb, output_traj_dcd)
     if ligand_mol is not None:
-        traj_affinities = {time_ps: get_affinity(traj_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool)
-                           for time_ps, traj_pdb in traj_pdbs.items()}
+        traj_affinities = {
+            time_ps: get_affinity(
+                traj_pdb, OPENMM_DEFAULT_LIGAND_ID, scoring_tool=scoring_tool
+            )
+            for time_ps, traj_pdb in traj_pdbs.items()
+        }
         for time_ps, affinity in traj_affinities.items():
             out_affinity.write(f"{time_ps:.2f}\t{affinity:.4f}\n")
 
@@ -704,18 +831,21 @@ def simulate(pdb_in:str, mol_in:str, output:str, num_steps:int,
     _ = analyze_traj(output_traj_dcd, output_complex_pdb, output_analysis_tsv)
 
     # Fix the state data file: from csv to tsv
-    (pd.read_csv(output_state_tsv, sep=',')
-       .map(lambda x: round(x, 4) if isinstance(x, float) else x)
-       .to_csv(output_state_tsv, sep='\t', index=False))
+    (
+        pd.read_csv(output_state_tsv, sep=",")
+        .map(lambda x: round(x, 4) if isinstance(x, float) else x)
+        .to_csv(output_state_tsv, sep="\t", index=False)
+    )
 
-    return {"complex_pdb": output_complex_pdb,
-            "traj_dcd": output_traj_dcd,
-            "minimized_pdb": output_minimized_pdb,
-            "affinity_tsv": output_affinity_tsv,
-            "args_json": output_args_json,
-            "state_tsv": output_state_tsv,
-            "analysis_tsv": output_analysis_tsv,
-            }
+    return {
+        "complex_pdb": output_complex_pdb,
+        "traj_dcd": output_traj_dcd,
+        "minimized_pdb": output_minimized_pdb,
+        "affinity_tsv": output_affinity_tsv,
+        "args_json": output_args_json,
+        "state_tsv": output_state_tsv,
+        "analysis_tsv": output_analysis_tsv,
+    }
 
 
 if __name__ == "__main__":
@@ -724,14 +854,29 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OpenMM protein-ligand simulation")
     parser.add_argument("pdb_in", type=str, help="Input PDB file path")
     parser.add_argument("mol_in", type=str, help="Input mol file path")
-    parser.add_argument("output", type=str, help="Output file name root, including path")
+    parser.add_argument(
+        "output", type=str, help="Output file name root, including path"
+    )
     parser.add_argument("num_steps", type=int, help="Number of simulation steps")
-    parser.add_argument("--use_solvent", action='store_true', help="Use solvent?")
-    parser.add_argument("--decoy_smiles", type=str, default=None, help="Use a decoy aligned to mol_in for simulation")
-    parser.add_argument("--minimize_only", action='store_true', help="Only perform minimization")
-    parser.add_argument("--temperature", type=float, default=300.0, help="Temperature in Kelvin")
-    parser.add_argument("--equilibration_steps", type=int, default=200, help="Equilibration steps")
-    parser.add_argument("--reporting_interval", type=int, default=None, help="Reporting interval")
+    parser.add_argument("--use_solvent", action="store_true", help="Use solvent?")
+    parser.add_argument(
+        "--decoy_smiles",
+        type=str,
+        default=None,
+        help="Use a decoy aligned to mol_in for simulation",
+    )
+    parser.add_argument(
+        "--minimize_only", action="store_true", help="Only perform minimization"
+    )
+    parser.add_argument(
+        "--temperature", type=float, default=300.0, help="Temperature in Kelvin"
+    )
+    parser.add_argument(
+        "--equilibration_steps", type=int, default=200, help="Equilibration steps"
+    )
+    parser.add_argument(
+        "--reporting_interval", type=int, default=None, help="Reporting interval"
+    )
     args = parser.parse_args()
 
     simulate(
