@@ -63,8 +63,7 @@ def download_models():
 image = (
     Image.debian_slim()
     .apt_install("wget")
-    .pip_install("uv")
-    .run_commands("uv pip install --system --compile-bytecode chai_lab==0.6.1")
+    .uv_pip_install("chai_lab==0.6.1")
     .run_function(download_models, gpu="a100")
 )
 
@@ -79,7 +78,7 @@ def chai1(
     num_diffn_timesteps: int = 200,
     seed: int = 42,
     use_esm_embeddings: bool = True,
-    chai1_kwargs:dict = {},
+    chai1_kwargs: dict = {},
 ) -> list:
     """Runs Chai-1 on a FASTA file string and returns the output files.
 
