@@ -32,14 +32,14 @@ Example usage:
 ```
 # Nanobody design with antigen
 # FASTA: >H\nsequence...\n>A\n(empty, just specifies chain A)
-uv run modal run modal_iggm.py --input-fasta nanobody.fasta --antigen antigen.pdb --epitope "41,42,43" --mode design
+uv run modal run modal_iggm.py --input-fasta nanobody.fasta --antigen antigen.pdb --epitope "41,42,43" --task design
 
 # Antibody design with antigen
 # FASTA: >H\nsequence...\n>L\nsequence...\n>A\n(empty, just specifies chain A)
-uv run modal run modal_iggm.py --input-fasta antibody.fasta --antigen antigen.pdb --epitope "126,127,129" --mode design
+uv run modal run modal_iggm.py --input-fasta antibody.fasta --antigen antigen.pdb --epitope "126,127,129" --task design
 
 # Structure prediction only (no antigen)
-uv run modal run modal_iggm.py --input-fasta antibody.fasta --mode structure_prediction
+uv run modal run modal_iggm.py --input-fasta antibody.fasta --task design
 ```
 """
 
@@ -54,8 +54,7 @@ TIMEOUT = int(os.environ.get("TIMEOUT", 300))
 REQUIRED_INPUT_COLS = ["seq_id", "seq"]
 APPS_BUCKET_NAME = "apps"
 
-VALID_MODES = {
-    "structure_prediction",  # This maps to no --run_task (default design)
+VALID_TASKS = {
     "design",
     "inverse_design",
     "affinity_maturation",
@@ -121,7 +120,6 @@ image = (
     .run_function(download_models)
     .pip_install("prody==2.6.1")
     .pip_install("ipython")
-    .add_local_python_source("src", copy=True)
 )
 
 app = App("iggm", image=image)
@@ -203,7 +201,7 @@ def merge_pdb_chains(pdb_str: str, chains_to_merge: list) -> str:
 @app.function(timeout=TIMEOUT * 60, gpu=GPU)
 def iggm(
     input_fasta_str: str,
-    mode: str,
+    task: str,
     antigen_pdb_str: str | None = None,
     epitope: list[int] | None = None,
     fasta_origin_str: str | None = None,
@@ -215,7 +213,7 @@ def iggm(
 
     Args:
         input_fasta_str: Input antibody/nanobody sequence
-        mode: Design mode (structure_prediction, inverse_design, affinity_maturation, etc.)
+        task: Design task (design, inverse_design, affinity_maturation, etc.)
         antigen_pdb_str: Antigen structure (optional)
         epitope: List of epitope residue numbers (optional)
         fasta_origin_str: Original sequence for affinity maturation (optional)
@@ -228,7 +226,7 @@ def iggm(
     from tempfile import TemporaryDirectory
     import prody as pr
 
-    assert mode in VALID_MODES, f"Mode must be one of {VALID_MODES}"
+    assert task in VALID_TASKS, f"Task must be one of {VALID_TASKS}"
 
     with TemporaryDirectory() as work_dir:
         # Write input fasta
@@ -262,11 +260,8 @@ def iggm(
             orig_path.write_text(fasta_origin_str)
             cmd.extend(["--fasta_origin", str(orig_path)])
 
-        # Add task (structure_prediction uses default 'design' task)
-        if mode == "structure_prediction":
-            cmd.extend(["--run_task", "design"])
-        else:
-            cmd.extend(["--run_task", mode])
+        # Add task
+        cmd.extend(["--run_task", task])
 
         # Add other parameters
         if num_samples:
@@ -299,7 +294,7 @@ def iggm(
 @app.local_entrypoint()
 def main(
     input_fasta: str,
-    mode: str = "structure_prediction",
+    task: str = "design",
     antigen: str | None = None,
     epitope: str | None = None,
     fasta_origin: str | None = None,
@@ -325,7 +320,7 @@ def main(
     # Run IgGM
     outputs = iggm.remote(
         input_fasta_str=input_fasta_str,
-        mode=mode,
+        task=task,
         antigen_pdb_str=antigen_pdb_str,
         epitope=epitope_list,
         fasta_origin_str=fasta_origin_str,
