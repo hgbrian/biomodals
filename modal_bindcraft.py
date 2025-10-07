@@ -43,8 +43,9 @@ def set_up_pyrosetta():
 
 
 image = (
-    Image.debian_slim()
+    Image.debian_slim(python_version="3.11")
     .apt_install("git", "wget", "aria2", "ffmpeg")
+    .pip_install("numpy<2.0")  # Pin NumPy FIRST before any dependencies
     .pip_install(
         "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
     )
@@ -65,10 +66,11 @@ image = (
         " && tar -xf alphafold_params_2022-12-06.tar -C /root/bindcraft/params"
     )
     .run_function(set_up_pyrosetta)
-    .pip_install("jax[cuda]")
     .pip_install(
-        "matplotlib==3.8.1"
-    )  # https://github.com/martinpacesa/BindCraft/issues/4
+        "numpy<2.0",  # Re-enforce after pyrosetta (which may upgrade it)
+        "jax[cuda]<0.7.0",  # Pin to avoid 'wraps' removal in JAX 0.7.0
+        "matplotlib==3.8.1",  # https://github.com/martinpacesa/BindCraft/issues/4
+    )
 )
 
 
