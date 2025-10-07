@@ -20,8 +20,8 @@ from pathlib import Path
 
 from modal import App, Image
 
-# It is harder to provision A100s if you set the timeout too high
-GPU = os.environ.get("GPU", "A100")
+# It is harder to provision GPUs if you set the timeout too high
+GPU = os.environ.get("GPU", "L40S")
 TIMEOUT = int(os.environ.get("TIMEOUT", 300))
 print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
