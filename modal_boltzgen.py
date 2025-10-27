@@ -56,7 +56,7 @@ image = (
     .pip_install("torch>=2.4.1")
     .run_commands(
         "git clone https://github.com/HannesStark/boltzgen /root/boltzgen",
-        "cd /root/boltzgen && pip install -e .",
+        "cd /root/boltzgen && git checkout 58c1eed2b07f00fd5263f78fe2821c80d6875699 && pip install -e .",
         gpu="a10g",
     )
     .run_function(
