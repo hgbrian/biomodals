@@ -36,23 +36,16 @@ from modal import App, Image
 GPU = os.environ.get("GPU", "L40S")
 TIMEOUT = int(os.environ.get("TIMEOUT", 120))
 
-# HuggingFace token for downloading boltzgen models
-HF_TOKEN = os.environ.get("HF_TOKEN", None)
-
 
 def download_boltzgen_models():
     """Download all boltzgen models during image build to avoid runtime timeouts."""
     import subprocess
-
-    # Set HF_TOKEN for the download
-    os.environ["HF_TOKEN"] = HF_TOKEN
 
     # Download all artifacts to default cache location (~/.cache)
     print("Downloading boltzgen models...")
     subprocess.run(
         ["boltzgen", "download", "all"],
         check=True,
-        env=dict(os.environ, HF_TOKEN=HF_TOKEN),
     )
     print("Model download complete")
 
