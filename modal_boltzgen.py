@@ -37,7 +37,7 @@ GPU = os.environ.get("GPU", "L40S")
 TIMEOUT = int(os.environ.get("TIMEOUT", 120))
 
 # HuggingFace token for downloading boltzgen models
-HF_TOKEN = "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"
+HF_TOKEN = os.environ.get("HF_TOKEN", None)
 
 
 def download_boltzgen_models():
