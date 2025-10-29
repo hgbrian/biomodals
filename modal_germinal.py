@@ -6,18 +6,29 @@ Germinal is a pipeline for designing de novo antibodies against specified epitop
 The pipeline follows a 3-step process: hallucination based on ColabDesign, selective sequence redesign
 with AbMPNN, and cofolding with a structure prediction model.
 
-## Example target configuration (target.yaml):
-```yaml
-target_name: "pdl1"
-target_pdb_path: "pdbs/pdl1.pdb"
+## Setup and minimal test:
+```bash
+# Get the PD-L1 structure from RCSB PDB
+curl -O https://files.rcsb.org/download/5O45.pdb
+
+# Extract chain A only
+grep "^ATOM.*\ A\ " 5O45.pdb > 5O45_chainA.pdb
+
+# Create target configuration file
+cat > target_example.yaml << 'EOF'
+target_name: "5O45"
+target_pdb_path: "5O45_chainA.pdb"
 target_chain: "A"
 binder_chain: "B"
-target_hotspots: "25,26,39,41"
-dimer: false
-length: 133
+target_hotspots: "A19,A20,A21,A22"
+length: 129
+EOF
+
+# Run minimal test (1 trajectory, 1 passing design)
+uvx --with PyYAML modal run modal_germinal.py --target-yaml target_example.yaml --max-trajectories 1 --max-passing-designs 1
 ```
 
-## Example usage:
+## Production usage:
 ```bash
 # Basic VHH design against PD-L1
 modal run modal_germinal.py --target-yaml target.yaml
@@ -43,14 +54,12 @@ REQUIRED_TARGET_COLS = [
     "target_hotspots",
     "length",
 ]
-APPS_BUCKET_NAME = "apps"
 
 GERMINAL_VOLUME_NAME = "germinal-models"
 GERMINAL_MODEL_VOLUME = Volume.from_name(GERMINAL_VOLUME_NAME, create_if_missing=True)
 
 # Cache directories for models
 AF_PARAMS_DIR = f"/{GERMINAL_VOLUME_NAME}/alphafold_params"
-PYROSETTA_DIR = f"/{GERMINAL_VOLUME_NAME}/pyrosetta"
 
 
 def download_models():
@@ -84,18 +93,96 @@ def download_models():
             check=True,
         )
 
-    # Create symlink for dssp in alphafold_params directory
-    dssp_link_path = Path(AF_PARAMS_DIR) / "dssp"
-    if not dssp_link_path.exists():
-        print("Creating dssp symlink in alphafold_params directory...")
-        subprocess.run(
-            ["ln", "-sf", "/usr/bin/dssp", str(dssp_link_path)],
-            check=True,
+
+def patch_germinal_code():
+    """Patch Germinal code to fix bugs and add features"""
+    import re
+
+    # Patch 1: Add entropy logging to design.py
+    design_py = Path("/tmp/germinal/germinal/design/design.py")
+    content = design_py.read_text()
+    content = content.replace(
+        "str(softmax_ipae),",
+        'str(softmax_ipae), " / entropy:", str(af_model._tmp["best"]["mean_soft_pseudo"]), f"(threshold: {seq_entropy_threshold})",',
+    )
+    design_py.write_text(content)
+    print("✓ Patched design.py: added entropy logging")
+
+    # Patch 2: Fix PDB headers for DSSP in utils.py
+    utils_py = Path("/tmp/germinal/germinal/utils/utils.py")
+    content = utils_py.read_text()
+    # Find def get_dssp and insert header fix code before it
+    pattern = r"(def get_dssp\([^)]*\):)"
+    header_fix = """    # Fix PDB headers for DSSP
+    from pathlib import Path as _Path
+    if _Path(pdb_file).exists():
+        with open(pdb_file) as _f: _content = _f.read()
+        if not _content.startswith("HEADER"):
+            _h = ["HEADER    PROTEIN                                 26-SEP-25   GERM", "TITLE     GERMINAL ANTIBODY DESIGN", "COMPND    MOL_ID: 1;", "COMPND   2 MOLECULE: ANTIBODY;", "SOURCE    MOL_ID: 1;", "SOURCE   2 ORGANISM_SCIENTIFIC: SYNTHETIC;"]
+            with open(pdb_file, "w") as _f: _f.write("\\n".join(_h) + "\\n" + _content)
+
+"""
+    content = re.sub(pattern, header_fix + r"\1", content)
+    utils_py.write_text(content)
+    print("✓ Patched utils.py: added PDB header fix for DSSP")
+
+    # Patch 3: Wrap PyRosetta filter calls in try-except
+    # Match the code block that calls filter_utils.run_filters with final_filters
+    # This is the code that can throw PyRosetta DAlphaBall geometry errors
+    run_germinal_py = Path("/tmp/germinal/run_germinal.py")
+    content = run_germinal_py.read_text()
+
+    # Pattern: Find the filter_metrics assignment through utils.clear_memory
+    # that uses final_filters (not initial_filters)
+    # Match the whole lines with their full indentation
+    pattern = re.compile(
+        r"^(                filter_metrics, filter_results, accepted, final_struct = \(\n"
+        r"                    filter_utils\.run_filters\(\n"
+        r"                        [^\n]+,\n"  # mpnn_trajectory
+        r"                        [^\n]+,\n"  # run_settings
+        r"                        [^\n]+,\n"  # target_settings
+        r"                        final_filters,\n"  # Key: this is final_filters not initial
+        r".*?"  # Everything in between
+        r"^                utils\.clear_memory\(clear_jax=False\)\n)",
+        re.MULTILINE | re.DOTALL,
+    )
+
+    match = pattern.search(content)
+    if match:
+        original_block = match.group(1)
+
+        # Step 1: Add 4 spaces to the beginning of every line (like sed does)
+        indented_lines = []
+        for line in original_block.split("\n"):
+            if line:  # Add 4 spaces to non-empty lines
+                indented_lines.append("    " + line)
+            else:  # Keep empty lines empty
+                indented_lines.append(line)
+        indented_block = "\n".join(indented_lines)
+
+        # Step 2: Wrap with try-except
+        # try: has 16 spaces (same level as original filter_metrics line)
+        # indented_block now has 20 spaces (16 + 4)
+        # except and its contents use 16 spaces base
+        wrapped = (
+            "                try:\n"  # 16 spaces
+            f"{indented_block}\n"  # Now has 20 spaces on first line
+            "                except RuntimeError as e:\n"  # 16 spaces
+            '                    if "surf_vol.cc" in str(e) or "DALPHABALL" in str(e):\n'  # 20 spaces
+            '                        print(f"WARNING: Skipping filters due to DAlphaBall geometry bug (known PyRosetta issue)")\n'  # 24 spaces
+            "                        continue\n"  # 24 spaces
+            "                    else:\n"  # 20 spaces
+            "                        raise\n"  # 24 spaces
         )
+
+        content = content.replace(original_block, wrapped)
+        run_germinal_py.write_text(content)
+        print("✓ Patched run_germinal.py: added try-except for PyRosetta geometry bugs")
+    else:
+        print("⚠ Warning: Could not find filter_utils.run_filters pattern to patch")
 
 
 image = (
-    # Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.10")
     Image.debian_slim(python_version="3.10")
     .apt_install(
         "wget",
@@ -153,10 +240,11 @@ image = (
     )
     .run_commands(
         "git clone https://github.com/SantiagoMille/germinal.git /tmp/germinal",
-        "cd /tmp/germinal && git checkout f7c0da1c7749b4a40d27744769350d4be95768ea",
+        "cd /tmp/germinal && git checkout 88d7f85aeb78684b05f872ec524255535ad15106",
     )
     .pip_install("cvxopt==1.3.2")
     .run_commands("cd /tmp/germinal && pip install -e .")
+    .run_function(patch_germinal_code)
     .pip_install("git+https://github.com/chaidiscovery/chai-lab.git")
     .pip_install("dm-haiku==0.0.13")
     .pip_install("joblib==1.5.2")
@@ -176,276 +264,47 @@ image = (
 app = App("germinal", image=image)
 
 
-def _prepare_target_config(target_data: dict, temp_dir: Path) -> Path:
-    """Create target configuration YAML file with proper Hydra package annotation"""
-    import yaml
-
-    # Resolve the PDB path to be absolute within the temp directory
-    pdb_path = temp_dir / target_data["target_pdb_path"]
-    absolute_pdb_path = str(pdb_path.resolve())
-    print("ABS", absolute_pdb_path)
-    # Use the same structure as the original Germinal target configs
-    target_config = f"""target_name: "{target_data["target_name"]}"
-target_pdb_path: "{absolute_pdb_path}"
-target_chain: "{target_data["target_chain"]}"
-binder_chain: "{target_data["binder_chain"]}"
-target_hotspots: "{target_data["target_hotspots"]}"
-dimer: {str(target_data.get("dimer", False)).lower()}
-length: {int(target_data["length"])}
-"""
-
-    target_yaml_path = temp_dir / "target.yaml"
-    with open(target_yaml_path, "w") as f:
-        f.write(target_config)
-
-    return target_yaml_path
-
-
-def _prepare_run_config(run_type: str, temp_dir: Path) -> Path:
-    """Create run configuration based on type (vhh or scfv)"""
-    import yaml
-
-    if run_type.lower() == "scfv":
-        run_config = {
-            "antibody_type": "scfv",
-            "weights_plddt": 1.0,
-            "weights_iptm": 1.0,
-            "weights_clashes": 5.0,
-            "weights_hotspot_contacts": 1.0,
-            "weights_interface_score": 1.0,
-            "weights_shape_complementarity": 1.0,
-            "num_sequences": 8,
-            "initial_guess": "nearest",
-            "num_recycles": 3,
-        }
-    else:  # default to vhh
-        run_config = {
-            "antibody_type": "vhh",
-            "weights_plddt": 1.0,
-            "weights_iptm": 1.0,
-            "weights_clashes": 5.0,
-            "weights_hotspot_contacts": 1.0,
-            "weights_interface_score": 1.0,
-            "weights_shape_complementarity": 1.0,
-            "num_sequences": 8,
-            "initial_guess": "nearest",
-            "num_recycles": 3,
-        }
-
-    run_yaml_path = temp_dir / f"{run_type.lower()}.yaml"
-    with open(run_yaml_path, "w") as f:
-        yaml.dump(run_config, f)
-
-    return run_yaml_path
-
-
 @app.function(
     gpu=GPU,
     timeout=TIMEOUT * 60,
     volumes={f"/{GERMINAL_VOLUME_NAME}": GERMINAL_MODEL_VOLUME},
 )
 def run_germinal_design(
-    target_data: dict,
+    target_yaml_content: str,
     pdb_content: bytes,
     run_type: str = "vhh",
     max_trajectories: int = 100,
     max_passing_designs: int = 10,
     experiment_name: str = "germinal_design",
-    seed: int = 42,
+    original_pdb_path: str = "pdbs/target.pdb",
 ) -> dict:
     """
     Run Germinal antibody design pipeline
 
     Args:
-        target_data: Dictionary containing target configuration
+        target_yaml_content: Target YAML file content as string
         pdb_content: PDB file content as bytes
         run_type: "vhh" or "scfv"
         max_trajectories: Maximum number of design trajectories
         max_passing_designs: Maximum number of passing designs to return
         experiment_name: Name for the experiment
-        seed: Random seed for reproducibility
+        original_pdb_path: Original PDB path from the YAML (to replace with absolute)
 
     Returns:
         Dictionary containing design results and metrics
     """
     import tempfile
-    import yaml
     import subprocess
     import shutil
+    import yaml
     from pathlib import Path
-
-    # Germinal is already installed in the image
-
-    # Create dssp symlink at runtime since volume mount happens at runtime
-    dssp_link_path = Path(AF_PARAMS_DIR) / "dssp"
-    if not dssp_link_path.exists():
-        print("Creating dssp symlink in alphafold_params directory...")
-        subprocess.run(
-            ["ln", "-sf", "/usr/bin/dssp", str(dssp_link_path)],
-            check=True,
-        )
-
-    def fix_pdb_headers(pdb_path):
-        """Add minimal PDB headers to make DSSP work with Germinal-generated PDB files"""
-        if not Path(pdb_path).exists():
-            return
-
-        with open(pdb_path, "r") as f:
-            content = f.read()
-
-        # Check if file already has headers
-        if content.startswith("HEADER"):
-            return
-
-        # Add minimal headers required by DSSP
-        headers = [
-            "HEADER    PROTEIN                                 26-SEP-25   GERM",
-            "TITLE     GERMINAL ANTIBODY DESIGN",
-            "COMPND    MOL_ID: 1;",
-            "COMPND   2 MOLECULE: ANTIBODY;",
-            "COMPND   3 ENGINEERED: YES",
-            "SOURCE    MOL_ID: 1;",
-            "SOURCE   2 ORGANISM_SCIENTIFIC: SYNTHETIC;",
-            "SOURCE   3 EXPRESSION_SYSTEM: GERMINAL PIPELINE",
-            "",
-        ]
-
-        with open(pdb_path, "w") as f:
-            f.write("\n".join(headers) + "\n")
-            f.write(content)
-
-        # Debug: Print first 20 lines after header fix
-        print(f"DEBUG: First 20 lines of {pdb_path} after header fix:")
-        with open(pdb_path, "r") as f:
-            lines = f.readlines()
-            for i, line in enumerate(lines[:20]):
-                print(f"{i + 1:2}: {line.rstrip()}")
-        print("DEBUG: End of PDB header preview")
-
-        print(f"Added PDB headers to {pdb_path} for DSSP compatibility")
-
-    # Patch Germinal's utils module for comprehensive DSSP error handling
-    def patch_germinal_dssp():
-        """Comprehensive monkey patch for DSSP failures in Germinal pipeline"""
-        try:
-            import sys
-
-            sys.path.insert(0, "/tmp/germinal")
-            from germinal.utils import utils
-            from germinal.filters import pyrosetta_utils
-
-            # Store original functions
-            original_calc_ss = utils.calc_ss_percentage
-            original_loop_sc = pyrosetta_utils.calculate_loop_sc
-
-            def patched_calc_ss_percentage(
-                pdb_file,
-                advanced_settings,
-                chain_id="B",
-                atom_distance_cutoff=4.0,
-                return_dict=False,
-                target_chain="A",
-            ):
-                """Patched version that handles DSSP failures gracefully"""
-                print(
-                    f"DEBUG: Patched calc_ss_percentage called with pdb_file: {pdb_file}"
-                )
-                try:
-                    # Print first few lines of PDB file before fixing headers
-                    if Path(pdb_file).exists():
-                        print(f"DEBUG: First 10 lines of {pdb_file} BEFORE header fix:")
-                        with open(pdb_file, "r") as f:
-                            for i, line in enumerate(f):
-                                if i >= 10:
-                                    break
-                                print(f"  {i + 1:2}: {line.rstrip()}")
-
-                    # Fix PDB headers before calling DSSP
-                    fix_pdb_headers(pdb_file)
-
-                    # Print first few lines after fixing headers
-                    if Path(pdb_file).exists():
-                        print(f"DEBUG: First 10 lines of {pdb_file} AFTER header fix:")
-                        with open(pdb_file, "r") as f:
-                            for i, line in enumerate(f):
-                                if i >= 10:
-                                    break
-                                print(f"  {i + 1:2}: {line.rstrip()}")
-                    return original_calc_ss(
-                        pdb_file,
-                        advanced_settings,
-                        chain_id,
-                        atom_distance_cutoff,
-                        return_dict,
-                        target_chain,
-                    )
-                except Exception as e:
-                    print(f"DSSP failed in calc_ss_percentage: {e}")
-                    print("Using default secondary structure values")
-
-                    # Return reasonable defaults when DSSP fails
-                    if return_dict:
-                        return {
-                            "alpha_": 15.0,  # Default ~15% helix
-                            "beta_": 25.0,  # Default ~25% sheet
-                            "loops_": 60.0,  # Default ~60% loops
-                            "alpha_i": 10.0,  # Interface slightly less structured
-                            "beta_i": 20.0,
-                            "loops_i": 70.0,
-                            "i_plddt": 0.8,  # Reasonable interface confidence
-                            "ss_plddt": 0.85,  # Reasonable SS confidence
-                        }
-                    else:
-                        return (15.0, 25.0, 60.0, 10.0, 20.0, 70.0, 0.8, 0.85)
-
-            def patched_calculate_loop_sc(pose, binder_chain="B", target_chain="A"):
-                """Patched version that handles PyRosetta DSSP failures gracefully"""
-                try:
-                    return original_loop_sc(pose, binder_chain, target_chain)
-                except Exception as e:
-                    print(f"PyRosetta DSSP failed in calculate_loop_sc: {e}")
-                    print("Using default loop shape complementarity values")
-                    # Return reasonable defaults: (sc_score, sc_area)
-                    return (0.6, 800.0)  # Moderate SC score, reasonable surface area
-
-            # Replace the functions in multiple places to ensure patching works
-            utils.calc_ss_percentage = patched_calc_ss_percentage
-            pyrosetta_utils.calculate_loop_sc = patched_calculate_loop_sc
-
-            # Also patch via the full module path to catch all references
-            import sys
-
-            if "germinal.utils.utils" in sys.modules:
-                sys.modules[
-                    "germinal.utils.utils"
-                ].calc_ss_percentage = patched_calc_ss_percentage
-                print("  - Also patched via sys.modules['germinal.utils.utils']")
-
-            # Direct patch on the germinal module if available
-            try:
-                import germinal.utils.utils as guu
-
-                guu.calc_ss_percentage = patched_calc_ss_percentage
-                print("  - Also patched via direct germinal.utils.utils import")
-            except ImportError:
-                pass
-
-            print("Successfully patched Germinal's DSSP functions for error handling")
-            print("  - Patched utils.calc_ss_percentage with correct signature")
-            print("  - Patched pyrosetta_utils.calculate_loop_sc for PyRosetta DSSP")
-            print("  - Added graceful degradation with reasonable defaults")
-
-        except Exception as e:
-            print(f"Could not patch Germinal DSSP functions: {e}")
-
-    # Apply the comprehensive patch
-    print("DEBUG: About to apply DSSP patches...")
-    patch_germinal_dssp()
-    print("DEBUG: DSSP patches applied")
 
     # Setup temporary working directory
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
+
+        # Parse YAML to get target_pdb_path
+        target_data = yaml.safe_load(target_yaml_content)
 
         # Write PDB file
         pdb_path = temp_path / target_data["target_pdb_path"]
@@ -476,12 +335,7 @@ def run_germinal_design(
         )
         (temp_path / "configs" / "filter" / "final").mkdir(parents=True, exist_ok=True)
 
-        # Create target configuration
-        target_yaml_path = _prepare_target_config(target_data, temp_path)
-
-        # We'll use the actual Germinal run configs instead of creating our own
-
-        # Copy and modify the original Germinal main config instead of creating from scratch
+        # Copy and modify the original Germinal main config
         germinal_configs_path = Path("/tmp/germinal/configs")
         original_config_path = germinal_configs_path / "config.yaml"
         main_config_path = temp_path / "configs" / "config.yaml"
@@ -506,11 +360,11 @@ def run_germinal_design(
             'af_params_dir: ""', f'af_params_dir: "{AF_PARAMS_DIR}"'
         )
         content = content.replace(
-            'dssp_path: "params/dssp"', f'dssp_path: "{AF_PARAMS_DIR}/dssp"'
+            'dssp_path: "params/dssp"', 'dssp_path: "/tmp/germinal/params/dssp"'
         )
         content = content.replace(
             'dalphaball_path: "params/DAlphaBall.gcc"',
-            f'dalphaball_path: "{AF_PARAMS_DIR}/DAlphaBall.gcc"',
+            'dalphaball_path: "/tmp/germinal/params/DAlphaBall.gcc"',
         )
 
         with open(main_config_path, "w") as f:
@@ -525,122 +379,29 @@ def run_germinal_design(
         )
 
         # Use "pdl1" as target name to avoid Hydra config issues
-        # Copy the known-working pdl1.yaml and just update the PDB path
         target_config_final_path = temp_path / "configs" / "target" / "pdl1.yaml"
 
         # Get the absolute PDB path
         absolute_pdb_path = str((temp_path / target_data["target_pdb_path"]).resolve())
 
-        # Copy the known-working pdl1.yaml and just update the PDB path
-        shutil.copy2(
-            germinal_configs_path / "target" / "pdl1.yaml", target_config_final_path
+        # Write the user's YAML directly, just replace the PDB path with absolute path
+        updated_yaml_content = target_yaml_content.replace(
+            original_pdb_path, absolute_pdb_path
         )
 
-        # Update just the PDB path in the copied config
-        with open(target_config_final_path, "r") as f:
-            content = f.read()
-
-        # Replace the PDB path with our absolute path (keep @package annotation)
-        content = content.replace("pdbs/pdl1.pdb", absolute_pdb_path)
-
         with open(target_config_final_path, "w") as f:
-            f.write(content)
+            f.write(updated_yaml_content)
 
-        # Clean up our generated config
-        target_yaml_path.unlink()
-
-        # Update target_name for consistency
         target_name = "pdl1"
 
         # Copy filter configs from Germinal and remove @package annotations
-        initial_filter_src = (
-            germinal_configs_path / "filter" / "initial" / "default.yaml"
-        )
-        initial_filter_dst = (
-            temp_path / "configs" / "filter" / "initial" / "default.yaml"
-        )
+        initial_filter_src = germinal_configs_path / "filter" / "initial" / "vhh.yaml"
+        initial_filter_dst = temp_path / "configs" / "filter" / "initial" / "vhh.yaml"
         shutil.copy2(initial_filter_src, initial_filter_dst)
 
-        # Keep @package annotation for initial filter (Hydra needs it)
-
-        final_filter_src = germinal_configs_path / "filter" / "final" / "default.yaml"
-        final_filter_dst = temp_path / "configs" / "filter" / "final" / "default.yaml"
+        final_filter_src = germinal_configs_path / "filter" / "final" / "vhh.yaml"
+        final_filter_dst = temp_path / "configs" / "filter" / "final" / "vhh.yaml"
         shutil.copy2(final_filter_src, final_filter_dst)
-
-        # Keep @package annotation for final filter (Hydra needs it)
-
-        # Debug: Validate our target config can be loaded
-        print(f"Target name: {target_name}")
-        print(f"Target config path: {target_config_final_path}")
-        with open(target_config_final_path) as f:
-            config_content = f.read()
-            print(f"Target config contents:")
-            print("=" * 40)
-            print(config_content)
-            print("=" * 40)
-
-        # Test if our YAML is valid
-        import yaml
-
-        try:
-            with open(target_config_final_path) as f:
-                parsed = yaml.safe_load(f)
-            print(f"YAML validation: SUCCESS - {parsed}")
-        except Exception as e:
-            print(f"YAML validation: FAILED - {e}")
-
-        print(f"PDB file exists at: {pdb_path} -> {pdb_path.exists()}")
-
-        # Copy any other existing target configs (but our custom one takes precedence)
-        # Skip copying the original configs to avoid conflicts with our custom config
-        # target_config_dir = germinal_configs_path / "target"
-        # for target_file in target_config_dir.glob("*.yaml"):
-        #     target_config_path = temp_path / "configs" / "target" / target_file.name
-        #     if not target_config_path.exists():  # Only copy if we don't already have it
-        #         shutil.copy2(target_file, target_config_path)
-
-        # Copy filter configs from Germinal
-        germinal_configs_path = Path("/tmp/germinal/configs")
-        print(f"Checking if filter configs exist:")
-        print(
-            f"Initial filter: {germinal_configs_path / 'filter' / 'initial' / 'default.yaml'} -> {(germinal_configs_path / 'filter' / 'initial' / 'default.yaml').exists()}"
-        )
-        print(
-            f"Final filter: {germinal_configs_path / 'filter' / 'final' / 'default.yaml'} -> {(germinal_configs_path / 'filter' / 'final' / 'default.yaml').exists()}"
-        )
-
-        # List what's actually in the germinal configs directory
-        print("Contents of /tmp/germinal/configs:")
-        import subprocess
-
-        subprocess.run(
-            ["find", "/tmp/germinal/configs", "-name", "*.yaml"], check=False
-        )
-
-        # More importantly, list what's in OUR configs directory
-        print(f"Contents of our configs directory {temp_path / 'configs'}:")
-        subprocess.run(
-            ["find", str(temp_path / "configs"), "-name", "*.yaml"], check=False
-        )
-        print(f"Target directory listing:")
-        subprocess.run(
-            ["ls", "-la", str(temp_path / "configs" / "target")], check=False
-        )
-
-        # Debug: Check filter configs
-        print(f"Filter directory structure:")
-        subprocess.run(
-            ["ls", "-laR", str(temp_path / "configs" / "filter")], check=False
-        )
-
-        filter_final_path = temp_path / "configs" / "filter" / "final" / "default.yaml"
-        if filter_final_path.exists():
-            print(f"Filter final config exists: {filter_final_path}")
-            with open(filter_final_path) as f:
-                content = f.read()[:200]  # First 200 chars
-                print(f"Filter final content preview: {content}")
-        else:
-            print(f"Filter final config MISSING: {filter_final_path}")
 
         # Run Germinal using subprocess (the proper way)
         try:
@@ -669,7 +430,7 @@ def run_germinal_design(
             if jax_check.stderr:
                 print(f"JAX check stderr: {jax_check.stderr}")
 
-            # Run Germinal as it's meant to be run
+            # Run Germinal (patched at image build time)
             cmd = [
                 "python",
                 "/tmp/germinal/run_germinal.py",
@@ -683,8 +444,8 @@ def run_germinal_design(
                 f"max_passing_designs={max_passing_designs}",
                 f"experiment_name={experiment_name}",
                 f"af_params_dir={AF_PARAMS_DIR}",
-                f"dalphaball_path={AF_PARAMS_DIR}/DAlphaBall.gcc",
-                f"dssp_path={AF_PARAMS_DIR}/dssp",
+                "dalphaball_path=/tmp/germinal/params/DAlphaBall.gcc",
+                "dssp_path=/tmp/germinal/params/dssp",
             ]
 
             # Set environment variable for detailed Hydra errors
@@ -705,31 +466,15 @@ def run_germinal_design(
             if result.stderr:
                 print(f"STDERR: {result.stderr}")
 
-            # Check if failure is due to DSSP error (which can be non-critical)
-            dssp_error = (
-                "DSSP failed to produce an output" in result.stderr
-                if result.stderr
-                else False
-            )
-
             if result.returncode != 0:
-                if dssp_error:
-                    print(
-                        "WARNING: DSSP failed during post-processing, but this may be non-critical."
-                    )
-                    print(
-                        "Antibody design may have completed successfully. Checking for results..."
-                    )
-                    # Continue to process results despite DSSP failure - don't return error
-                else:
-                    return {
-                        "error": f"Germinal failed with return code {result.returncode}",
-                        "stdout": result.stdout,
-                        "stderr": result.stderr,
-                        "experiment_name": experiment_name,
-                        "target_name": target_data["target_name"],
-                        "status": "failed",
-                    }
+                return {
+                    "error": f"Germinal failed with return code {result.returncode}",
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "experiment_name": experiment_name,
+                    "target_name": target_data["target_name"],
+                    "status": "failed",
+                }
 
             # Look for results in the expected output directory
             results_dir = temp_path / "results" / experiment_name
@@ -740,22 +485,15 @@ def run_germinal_design(
                 all_trajectories_file = results_dir / "all_trajectories.csv"
                 accepted_file = results_dir / "accepted" / "designs.csv"
 
-                status = "completed"
-                if dssp_error:
-                    status = "completed_with_warnings"
-
                 results_data = {
                     "experiment_name": experiment_name,
                     "run_type": run_type,
                     "target_name": target_data["target_name"],
-                    "status": status,
+                    "status": "completed",
                     "stdout": result.stdout,
                     "stderr": result.stderr,
                     "results_directory": str(results_dir),
                     "output_files": {},
-                    "warnings": ["DSSP failed during post-processing"]
-                    if dssp_error
-                    else [],
                 }
 
                 # Copy all files from results directory
@@ -766,23 +504,9 @@ def run_germinal_design(
                         file_path = Path(root) / file
                         relative_path = file_path.relative_to(results_dir)
                         try:
-                            # Read text files
-                            if file_path.suffix in [
-                                ".csv",
-                                ".txt",
-                                ".yaml",
-                                ".json",
-                                ".log",
-                            ]:
-                                with open(file_path, "r") as f:
-                                    results_data["output_files"][str(relative_path)] = (
-                                        f.read()
-                                    )
-                            else:
-                                # For binary files, just note their existence
-                                results_data["output_files"][str(relative_path)] = (
-                                    f"<binary file: {file_path.stat().st_size} bytes>"
-                                )
+                            # Read all files as text
+                            with open(file_path, "r") as f:
+                                results_data["output_files"][str(relative_path)] = f.read()
                         except Exception as e:
                             results_data["output_files"][str(relative_path)] = (
                                 f"<error reading file: {e}>"
@@ -853,8 +577,8 @@ def main(
     max_trajectories: int = 100,
     max_passing_designs: int = 10,
     experiment_name: str = "germinal_design",
-    seed: int = 42,
-    output_json: str = "germinal_results.json",
+    run_name: str | None = None,
+    out_dir: str = "./out/germinal",
 ):
     """
     Run Germinal antibody design locally
@@ -865,20 +589,22 @@ def main(
         max_trajectories: Maximum number of design trajectories
         max_passing_designs: Maximum number of passing designs
         experiment_name: Name for the experiment
-        seed: Random seed for reproducibility
-        output_json: Output file path for results
+        run_name: Optional name for the run directory
+        out_dir: Output directory base path
     """
     import json
     import yaml
     from pathlib import Path
+    from datetime import datetime
 
     # Load target configuration
     target_yaml_path = Path(target_yaml)
     if not target_yaml_path.exists():
         raise FileNotFoundError(f"Target YAML file not found: {target_yaml}")
 
-    with open(target_yaml_path) as f:
-        target_data = yaml.safe_load(f)
+    # Read YAML content and parse it
+    target_yaml_content = target_yaml_path.read_text()
+    target_data = yaml.safe_load(target_yaml_content)
 
     # Validate required fields
     missing_fields = [
@@ -888,7 +614,8 @@ def main(
         raise ValueError(f"Missing required target fields: {missing_fields}")
 
     # Load PDB file
-    pdb_path = Path(target_data["target_pdb_path"])
+    original_pdb_path = target_data["target_pdb_path"]
+    pdb_path = Path(original_pdb_path)
     if not pdb_path.is_absolute():
         pdb_path = target_yaml_path.parent / pdb_path
 
@@ -905,17 +632,22 @@ def main(
 
     # Run design
     results = run_germinal_design.remote(
-        target_data=target_data,
+        target_yaml_content=target_yaml_content,
         pdb_content=pdb_content,
         run_type=run_type,
         max_trajectories=max_trajectories,
         max_passing_designs=max_passing_designs,
         experiment_name=experiment_name,
-        seed=seed,
+        original_pdb_path=original_pdb_path,
     )
 
+    # Set up output directory
+    today = datetime.now().strftime("%Y%m%d%H%M")[2:]
+    out_dir_full = Path(out_dir) / (run_name or today)
+    out_dir_full.mkdir(parents=True, exist_ok=True)
+
     # Save results JSON
-    output_path = Path(output_json)
+    output_path = out_dir_full / "germinal_results.json"
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
 
@@ -925,15 +657,15 @@ def main(
     if "output_files" in results and results["output_files"]:
         print("Saving output files:")
         for file_path, content in results["output_files"].items():
-            local_file_path = Path(f"germinal_output_{file_path}")
+            local_file_path = out_dir_full / file_path
             local_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if not content.startswith("<"):  # Skip binary/error markers
+            if content.startswith("<"):  # Error markers
+                print(f"  - {file_path}: {content}")
+            else:
                 with open(local_file_path, "w") as f:
                     f.write(content)
                 print(f"  - {local_file_path}")
-            else:
-                print(f"  - {file_path}: {content}")
 
     if "error" in results:
         print(f"Design failed: {results['error']}")
