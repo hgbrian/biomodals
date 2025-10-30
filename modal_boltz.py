@@ -80,7 +80,25 @@ def download_model():
 image = (
     Image.debian_slim(python_version="3.11")
     .micromamba()
-    .apt_install("wget", "git")
+    .apt_install(
+        "wget",
+        "git",
+        "gcc",
+        "g++",
+        "build-essential",
+        "curl",
+        "aria2",
+        "ffmpeg",
+        "procps",
+        "zlib1g-dev",
+        "libhdf5-dev",
+        "pkg-config",
+        "clang",
+        "llvm",  # Add this
+        "llvm-dev",  # Add this
+        "libc++-dev",  # Add this
+        "libc++abi-dev",  # Add this
+    )
     .pip_install(
         "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold@acc0bf772f22feb7f887ad132b7313ff415c8a9f"
     )
@@ -92,7 +110,6 @@ image = (
         gpu="a100",
     )
     .run_commands("python -m colabfold.download")
-    .apt_install("build-essential")
     .pip_install("boltz==2.0.3", "pyyaml")
     .run_function(
         download_model,
