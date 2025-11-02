@@ -35,14 +35,13 @@ modal run modal_boltz.py --input-yaml test_boltz.yaml --params-str "--use_msa_se
 ```
 """
 
-
 import os
 from pathlib import Path
 
 import modal
 from modal import App, Image, Volume
 
-GPU = os.environ.get("GPU", "A100")
+GPU = os.environ.get("GPU", "L40S")
 TIMEOUT = int(os.environ.get("TIMEOUT", 60))
 
 BOLTZ_VOLUME_NAME = "boltz-models"
@@ -80,7 +79,7 @@ def download_model():
 image = (
     Image.debian_slim(python_version="3.11")
     .micromamba()
-    .apt_install("wget", "git")
+    .apt_install("wget", "git", "gcc", "g++")
     .pip_install(
         "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold@acc0bf772f22feb7f887ad132b7313ff415c8a9f"
     )
@@ -93,7 +92,14 @@ image = (
     )
     .run_commands("python -m colabfold.download")
     .apt_install("build-essential")
-    .pip_install("boltz==2.0.3", "pyyaml")
+    # Install CUDA toolkit via conda
+    .pip_install(
+        "boltz==2.2.1",
+        "pyyaml",
+        "pandas",
+        "cuequivariance-torch",
+        "cuequivariance-ops-torch-cu12",
+    )
     .run_function(
         download_model,
         gpu="a10g",
