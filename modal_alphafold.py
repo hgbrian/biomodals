@@ -30,7 +30,7 @@ image = (
         "kalign2=2.04", "hhsuite=3.3.0", channels=["conda-forge", "bioconda"]
     )
     .run_commands(
-        'pip install --upgrade "jax[cuda12_pip]==0.5.3" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
+        'pip install --upgrade "jax[cuda12_pip]==0.5.3" "numpy<2.0" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html',
         gpu="a10g",
     )
     .run_commands("python -m colabfold.download")

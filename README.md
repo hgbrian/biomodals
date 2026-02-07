@@ -178,6 +178,21 @@ EOF
 uvx --with PyYAML modal run modal_germinal.py --target-yaml target_example.yaml --max-trajectories 1 --max-passing-designs 1
 ```
 
+## mBER (VHH nanobody design)
+
+Design VHH nanobody binders against a target protein using [mBER](https://github.com/manifoldbio/mber-open).
+
+```bash
+wget https://files.rcsb.org/download/7STF.pdb
+uvx modal run modal_mber.py --target-pdb 7STF.pdb --target-name PDL1
+```
+
+With custom masked sequence (* = positions to design):
+```bash
+uvx modal run modal_mber.py --target-pdb target.pdb --target-name MyTarget \
+    --masked-binder-seq "EVQLVESGGGLVQPGGSLRLSCAASG*********WFRQAPGKEREF***********NADSVKGRFTISRDNAKNTLYLQMNSLRAEDTAVYYC************WGQGTLVTVSS"
+```
+
 ## Other modal repos
 
 - [RNA Seq Pipeline](https://github.com/tdsone/modal-rna-seq-pipeline) by @tdsone
