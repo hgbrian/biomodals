@@ -35,13 +35,13 @@ image = (
     Image.micromamba()
     .apt_install("wget", "curl", "git", "g++")
     .pip_install(
-        "git+https://github.com/sokrypton/ColabDesign.git@v1.1.2", "jax[cuda12_pip]"
+        "git+https://github.com/sokrypton/ColabDesign.git@v1.1.3",
+        "jax[cuda12_pip]==0.5.3",
     )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign",
         "mkdir params",
         "curl -fsSL https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar | tar x -C params",
-        "mv params /root/",
         "wget -qnc https://zhanggroup.org/TM-score/TMscore.cpp",
         "g++ -static -O3 -ffast-math -lm -o TMscore TMscore.cpp",
         "cp TMscore /root/",
@@ -61,6 +61,70 @@ with image.imports():
     import matplotlib.pyplot as plt
     import numpy as np
     from scipy.stats import spearmanr
+
+    def calc_ipsae(pae_matrix: np.ndarray, chain_ids: np.ndarray, pae_cutoff: float = 10.0) -> float:
+        """Calculate ipSAE (interface predicted SAE) from PAE matrix.
+
+        Based on Dunbrack lab's IPSAE: https://github.com/DunbrackLab/IPSAE
+
+        Args:
+            pae_matrix: NxN predicted aligned error matrix (in Angstroms)
+            chain_ids: Array of chain IDs for each residue
+            pae_cutoff: PAE cutoff for considering contacts (default 10.0)
+
+        Returns:
+            ipSAE score (max over chain pairs and directions)
+        """
+        def ptm_func(x, d0):
+            return 1.0 / (1 + (x / d0) ** 2.0)
+
+        def calc_d0(L):
+            L = float(max(27, L))
+            return max(1.0, 1.24 * (L - 15) ** (1.0 / 3.0) - 1.8)
+
+        unique_chains = np.unique(chain_ids)
+        if len(unique_chains) < 2:
+            return 0.0
+
+        ipsae_values = []
+
+        for chain1 in unique_chains:
+            for chain2 in unique_chains:
+                if chain1 == chain2:
+                    continue
+
+                chain1_mask = chain_ids == chain1
+                chain2_mask = chain_ids == chain2
+
+                # Count residues in each chain that have good interchain PAE
+                unique_res_chain1 = set()
+                unique_res_chain2 = set()
+
+                for i in np.where(chain1_mask)[0]:
+                    valid = chain2_mask & (pae_matrix[i] < pae_cutoff)
+                    if valid.any():
+                        unique_res_chain1.add(i)
+                        for j in np.where(valid)[0]:
+                            unique_res_chain2.add(j)
+
+                n0dom = len(unique_res_chain1) + len(unique_res_chain2)
+                if n0dom == 0:
+                    continue
+
+                d0dom = calc_d0(n0dom)
+
+                # Calculate ipSAE for each residue in chain1
+                ipsae_byres = []
+                for i in np.where(chain1_mask)[0]:
+                    valid = chain2_mask & (pae_matrix[i] < pae_cutoff)
+                    if valid.any():
+                        ptm_vals = ptm_func(pae_matrix[i, valid], d0dom)
+                        ipsae_byres.append(ptm_vals.mean())
+
+                if ipsae_byres:
+                    ipsae_values.append(max(ipsae_byres))
+
+        return max(ipsae_values) if ipsae_values else 0.0
 
     def tmscore(x, y):
         """Calculates the TMscore between two protein structures.
@@ -244,7 +308,7 @@ with image.imports():
                 dict: A dictionary containing scores such as 'plddt', 'pae', 'ptm', 'iptm',
                       'rmsd_io' (RMSD between input and output), 'tm_i' (TMscore to input if reference provided),
                       'tm_o' (TMscore to output if reference provided), 'tm_io' (TMscore between input and output),
-                      and 'composite' (ptm * plddt * tm_io).
+                      'composite' (ptm * plddt * tm_io), and 'i_sae' (ipSAE for multimer models).
             """
             from colabdesign.shared.utils import copy_dict
 
@@ -268,6 +332,15 @@ with image.imports():
 
             # composite score
             score["composite"] = score["ptm"] * score["plddt"] * score["tm_io"]
+
+            # ipSAE calculation for multimer models
+            pae_matrix = self.model.aux.get("pae")
+            asym_id = self.model._inputs.get("asym_id")
+            if pae_matrix is not None and asym_id is not None:
+                score["i_sae"] = float(calc_ipsae(np.array(pae_matrix), np.array(asym_id)))
+            else:
+                score["i_sae"] = 0.0
+
             return score
 
         def predict(
@@ -357,17 +430,16 @@ with image.imports():
                     "composite",
                     "ptm",
                     "i_ptm",
+                    "i_sae",
                     "plddt",
                     "fitness",
                     "id",
                 ]
 
                 def print_score(k):
-                    return (
-                        f"{k} {score[k]:.4f}"
-                        if isinstance(score[k], float)
-                        else f"{k} {score[k]}"
-                    )
+                    if isinstance(score[k], float):
+                        return f"{k} {score[k]:.4f}"
+                    return f"{k} {score[k]}"
 
                 print(*[print_score(k) for k in print_list if k in score])
 
@@ -429,8 +501,20 @@ def run_af2rank(
     af = af2rank(in_pdb, chains, model_name=SETTINGS["model_name"])
     score = af.predict(pdb=in_pdb, **SETTINGS, extras={"id": in_pdb})
 
-    results = SETTINGS | {"score": score, "chains": chains}
-    open(Path(out_dir) / "results.json", "w").write(json.dumps(results))
+    # Convert numpy types to native Python for JSON serialization
+    def convert_for_json(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.floating, np.integer)):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {k: convert_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [convert_for_json(v) for v in obj]
+        return obj
+
+    results = SETTINGS | {"score": convert_for_json(score), "chains": chains}
+    open(Path(out_dir) / "results.json", "w").write(json.dumps(results, indent=2))
     open(Path(out_dir) / f"{Path(pdb_name).stem}_af2rank.pdb", "w").write(pdb_str)
 
     return [
@@ -450,13 +534,10 @@ def main(
     mask_sequence: bool = False,
     mask_sidechains: bool = False,
     mask_interchain: bool = False,
-    out_dir: str ="./out/af2rank",
+    out_dir: str = "./out/af2rank",
     run_name: str | None = None,
 ):
     """Local entrypoint for the Modal app to run AF2Rank.
-
-    This function handles fetching the PDB data, invoking the remote Modal function
-    `run_af2rank`, and saving the results locally.
 
     Args:
         input_pdb (str): Path to the input PDB file.
@@ -469,17 +550,11 @@ def main(
         mask_interchain (bool): Whether to remove interchain information from the template (for multimers).
         out_dir (str): Directory to save the output files.
         run_name (str | None): Optional name for the run, used to create a subdirectory in `out_dir`.
-                               If None, a timestamp-based name is used.
-
-    Returns:
-        None
     """
-    # model_{model_num}_multimer_v3
     from datetime import datetime
 
     pdb_str = open(input_pdb).read()
 
-    # model_{n}_ptm or model_{n}_multimer_v3
     if model_name is None:
         model_name = "model_1_ptm"
 
