@@ -12,14 +12,8 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 MODAL_FILES = sorted(REPO_ROOT.glob("modal_*.py"))
 
-# Apps that use imports not available locally (e.g. BioPython's Select)
-KNOWN_LOCAL_IMPORT_FAILURES = {"modal_afdesign.py"}
-
-
 @pytest.fixture(params=MODAL_FILES, ids=lambda p: p.name)
 def modal_file(request):
-    if request.param.name in KNOWN_LOCAL_IMPORT_FAILURES:
-        pytest.xfail(f"{request.param.name} has imports only available on Modal image")
     return request.param
 
 

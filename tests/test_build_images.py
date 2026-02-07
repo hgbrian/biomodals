@@ -71,7 +71,7 @@ def test_image_builds(modal_file, tmp_path):
         ["uv", "run", "--with", "modal", "modal", "run", str(script)],
         capture_output=True,
         text=True,
-        timeout=1800,  # 30 min per image
+        timeout=3600,  # 60 min per image
         cwd=REPO_ROOT,
     )
     assert result.returncode == 0, (

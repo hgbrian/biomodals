@@ -1,4 +1,4 @@
-"""
+r"""
 Germinal: Efficient generation of epitope-targeted de novo antibodies
 https://github.com/SantiagoMille/germinal/
 

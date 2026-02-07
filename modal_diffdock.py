@@ -38,7 +38,7 @@ TIMEOUT = int(os.environ.get("TIMEOUT", 15))
 app = App()
 
 image = (
-    Image.micromamba(python_version="3.9")
+    Image.micromamba(python_version="3.10")
     .apt_install(["git", "wget", "nano"])
     .run_commands("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib")
     .pip_install(

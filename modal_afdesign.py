@@ -75,35 +75,26 @@ with image.imports():
     from Bio.PDB.NeighborSearch import NeighborSearch
     from scipy.special import softmax
 
+    class ResidueRangeSelect(Select):
+        """Bio.PDB.Select class to accept residues within a specific range and chain."""
+        def __init__(self, chain_ids, start, end):
+            self.chain_ids = chain_ids
+            self.start = start
+            self.end = end
+
+        def accept_residue(self, residue):
+            within_range = self.start <= residue.get_id()[1] <= self.end
+            correct_chain = residue.parent.id in self.chain_ids
+            return within_range and correct_chain
+
 
 app = App("afdesign", image=image)
 
 
-# ------------------------------------------------------------------------------
-# BN added this function
-#
 def add_cyclic_offset(self):
-    """Adds cyclic offset to connect N and C termini head to tail.
-
-    This function modifies the model's internal offset matrix to enforce
-    cyclization in peptide design.
-
-    Args:
-        self (colabdesign.af.model.af_model): The AFDesign model instance.
-
-    Returns:
-        None
-    """
+    """Adds cyclic offset to connect N and C termini head to tail."""
 
     def _cyclic_offset(L):
-        """Calculates the cyclic offset matrix for a given length.
-
-        Args:
-            L (int): The length of the sequence or segment.
-
-        Returns:
-            np.ndarray: The cyclic offset matrix.
-        """
         i = np.arange(L)
         ij = np.stack([i, i + L], -1)
         offset = i[:, None] - i[None, :]
@@ -126,86 +117,19 @@ def add_cyclic_offset(self):
     self._inputs["offset"] = offset
 
 
-# ------------------------------------------------------------------------------
-# BN added this function
-#
-class ResidueRangeSelect(Select):
-    """Bio.PDB.Select class to accept residues within a specific range and chain."""
-    def __init__(self, chain_ids, start, end):
-        """Initializes the ResidueRangeSelect class.
-
-        Args:
-            chain_ids (list[str]): List of chain IDs to accept.
-            start (int): Starting residue number to accept.
-            end (int): Ending residue number to accept.
-        """
-        self.chain_ids = chain_ids
-        self.start = start
-        self.end = end
-
-    def accept_residue(self, residue):
-        """Accepts a residue if it's within the specified range and chain.
-
-        Args:
-            residue (Bio.PDB.Residue.Residue): The residue to check.
-
-        Returns:
-            bool: True if the residue is accepted, False otherwise.
-        """
-        within_range = self.start <= residue.get_id()[1] <= self.end
-        correct_chain = residue.parent.id in self.chain_ids
-        return within_range and correct_chain
-
-
 def extract_residues_from_pdb(pdb_file, chain_ids, start_residue, end_residue):
-    """Extracts a specific range of residues from specified chains in a PDB file.
-
-    Args:
-        pdb_file (str): Path to the input PDB file.
-        chain_ids (list[str]): List of chain IDs from which to extract residues.
-        start_residue (int): Starting residue number.
-        end_residue (int): Ending residue number.
-
-    Returns:
-        str: Path to a temporary PDB file containing the extracted residues.
-    """
-    # create a PDBParser object
+    """Extracts a specific range of residues from specified chains in a PDB file."""
     parser = PDBParser()
-
-    # read the structure from a PDB file
     structure = parser.get_structure("my_protein", pdb_file)
-
-    # create a PDBIO object
     io = PDBIO()
-
-    # set the structure to be written
     io.set_structure(structure)
-
-    # create a temporary file for output
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdb")
-
-    # save the structure to the new PDB file, including only the specified range of residues
     io.save(temp_file.name, ResidueRangeSelect(chain_ids, start_residue, end_residue))
-
     return temp_file.name
 
 
-# ------------------------------------------------------------------------------
-# BN added this merging tool
-#
 def join_chains(pdb_file, target_chain, merge_chains):
-    """Uses pdb-tools to combine specified chains in a PDB file into a single chain.
-
-    Note: This might be unnecessary depending on AFDesign's capabilities.
-
-    Args:
-        pdb_file (str): Path to the input PDB file.
-        target_chain (str): The new chain ID for the merged chain.
-        merge_chains (list[str]): List of chain IDs to merge.
-
-    Returns:
-        str: Path to a temporary PDB file with merged chains.
-    """
+    """Uses pdb-tools to combine specified chains in a PDB file into a single chain."""
     with NamedTemporaryFile(suffix=".pdb", delete=False) as tf:
         subprocess.run(
             f"pdb_selchain -{','.join(merge_chains)} {pdb_file} | "
@@ -216,44 +140,27 @@ def join_chains(pdb_file, target_chain, merge_chains):
         return tf.name
 
 
-# ------------------------------------------------------------------------------
-# BN added this function
-#
 def get_nearby_residues(pdb_file, ligand_id, distance=8.0):
-    """Reports the protein residues within a specified distance of a ligand.
-
-    Args:
-        pdb_file (str): Path to the PDB file.
-        ligand_id (str): Residue name of the ligand (e.g., "LG1").
-        distance (float, optional): Distance threshold in Angstroms. Defaults to 8.0.
-
-    Returns:
-        set[Bio.PDB.Residue.Residue]: A set of Biopython Residue objects that are near the ligand.
-    """
+    """Reports the protein residues within a specified distance of a ligand."""
     parser = PDBParser()
     structure = parser.get_structure("protein", pdb_file)
 
-    # Get all atoms in the protein
     protein_atoms = [
         atom
         for atom in structure.get_atoms()
         if atom.parent.get_resname() != ligand_id and is_aa(atom.parent)
     ]
 
-    # Get all atoms in the ligand
     ligand_atoms = [
         atom for atom in structure.get_atoms() if atom.parent.get_resname() == ligand_id
     ]
 
-    # Create a NeighborSearch object
     ns = NeighborSearch(protein_atoms)
 
-    # Find all protein atoms within `distance` of any ligand atom
     nearby_atoms = []
     for ligand_atom in ligand_atoms:
         nearby_atoms.extend(ns.search(ligand_atom.coord, distance))
 
-    # Get the residues corresponding to these atoms
     nearby_residues = {atom.parent for atom in nearby_atoms}
 
     return nearby_residues
