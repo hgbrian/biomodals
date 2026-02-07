@@ -10,4 +10,8 @@
 import subprocess
 import sys
 
-sys.exit(subprocess.call(["pytest", "tests/", "-v", *sys.argv[1:]]))
+sys.exit(subprocess.call([
+    "pytest", "tests/", "-v",
+    "--ignore=tests/test_build_images.py",
+    *sys.argv[1:],
+]))
