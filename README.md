@@ -69,7 +69,7 @@ DiffDock may require an 80GB A100 to run for larger proteins.
 ```bash
 wget https://files.rcsb.org/download/1IGY.pdb
 wget https://gist.github.com/hgbrian/393ec799893cbf518f3084847c17cb2d/raw/1IGY_example.mol2
-uvx modal run modal_diffdock.py --pdb 1IGY.pdb --mol2 in/diffdock/1IGY_example.mol2
+uvx modal run modal_diffdock.py --pdb-file 1IGY.pdb --mol2-file 1IGY_example.mol2
 ```
 
 ## ESM2
@@ -129,7 +129,7 @@ uvx modal run modal_nextflow_example.py
 [Boltz](https://github.com/jwohlwend/boltz), an open source AlphaFold 3-like model.
 ```bash
 echo "sequences:\n    - protein:\n        id: A\n        sequence: TDKLIFGKGTRVTVEP" > test_boltz.yaml
-uvx modal==1.2.1 run modal_boltz.py --input-yaml test_boltz.yaml
+uvx modal run modal_boltz.py --input-yaml test_boltz.yaml --params-str "--seed 42"
 ```
 
 # Chai-1
@@ -137,6 +137,21 @@ uvx modal==1.2.1 run modal_boltz.py --input-yaml test_boltz.yaml
 ```bash
 echo ">protein|name=insulin\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS\n>RNA|name=rna\nACUGACUGGAAGUCCCCCGUAGUACCCGACG\n>ligand|name=caffeine\nN[C@@H](Cc1ccc(O)cc1)C(=O)O" > test_chai1.faa
 uvx modal run modal_chai1.py --input-faa test_chai1.faa
+```
+
+## BoltzGen
+[BoltzGen](https://github.com/HannesStark/boltzgen), generative model for biomolecular structures.
+```bash
+wget https://raw.githubusercontent.com/HannesStark/boltzgen/refs/heads/main/example/vanilla_protein/1g13.cif
+wget https://raw.githubusercontent.com/HannesStark/boltzgen/refs/heads/main/example/vanilla_protein/1g13prot.yaml
+uvx modal run modal_boltzgen.py --input-yaml 1g13prot.yaml --num-designs 1
+```
+
+## IgGM
+[IgGM](https://github.com/THUNLP-MT/IgGM), antibody design model.
+```bash
+wget https://files.rcsb.org/download/5O45.pdb
+uvx modal run modal_iggm.py --input-fasta test_iggm.faa --antigen 5O45.pdb
 ```
 
 ## LigandMPNN
@@ -191,6 +206,20 @@ With custom masked sequence (* = positions to design):
 ```bash
 uvx modal run modal_mber.py --target-pdb target.pdb --target-name MyTarget \
     --masked-binder-seq "EVQLVESGGGLVQPGGSLRLSCAASG*********WFRQAPGKEREF***********NADSVKGRFTISRDNAKNTLYLQMNSLRAEDTAVYYC************WGQGTLVTVSS"
+```
+
+## Testing
+
+Build all images (no GPU, but slow):
+```bash
+uv run --with modal --with pytest pytest tests/test_build_images.py -v
+uv run --with modal --with pytest pytest tests/test_build_images.py -v -k alphafold  # single app
+```
+
+Run all apps with minimal inputs (uses GPU, costs money):
+```bash
+uv run --with modal --with pytest pytest tests/test_quick_runs.py -v
+uv run --with modal --with pytest pytest tests/test_quick_runs.py -v -k mber  # single app
 ```
 
 ## Other modal repos

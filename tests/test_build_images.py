@@ -1,10 +1,15 @@
 """Test that Modal app images build successfully.
 
-WARNING: These tests are SLOW (5-30 min per app) and use Modal cloud resources.
+WARNING: These tests are SLOW and use Modal cloud resources.
 They are excluded from the default test run.
 
 Run all:    uv run run_tests.py tests/test_build_images.py
 Run one:    uv run run_tests.py tests/test_build_images.py -k alphafold
+
+Expected first-build times (uncached):
+    5-10 min      most apps
+    15-30 min     afdesign, alphafold, bindcraft, rso (large pip installs)
+    1-2 hours     diffdock (downloads ~3GB of ESM2 + DiffDock models)
 """
 
 import subprocess

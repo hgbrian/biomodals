@@ -22,7 +22,7 @@ image = (
         "numpy",
         "pandas",
         "biopython",
-        "jax[cuda]",
+        "jax[cuda]==0.5.3",
         "git+https://github.com/sokrypton/ColabDesign.git",
     )
     .run_commands(

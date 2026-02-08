@@ -54,7 +54,7 @@ image = (
         "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
     )
     .pip_install(
-        "git+https://github.com/sokrypton/ColabDesign.git@v1.1.2", "jax[cuda12_pip]"
+        "git+https://github.com/sokrypton/ColabDesign.git@v1.1.2", "jax[cuda12_pip]==0.5.3"
     )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign;"
@@ -210,7 +210,7 @@ def get_pdb(pdb_code_or_file, biological_assembly=False, pdb_redo=False, out_dir
                 print("Failed to find pdb-redo version. Using RSCB pdb.")
                 pdb_redo = False
             else:
-                return out_path
+                return str(out_path)
 
         if pdb_redo is False:
             pdb_name = f"{pdb_code_or_file}.pdb{'1' if biological_assembly else ''}"

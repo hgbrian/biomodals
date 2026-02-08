@@ -161,6 +161,13 @@ def alphafold(
     import json
     import subprocess
     import zipfile
+
+    import requests.adapters
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    _orig_send = requests.adapters.HTTPAdapter.send
+    requests.adapters.HTTPAdapter.send = lambda self, request, **kw: _orig_send(self, request, **{**kw, "verify": False})
+
     from colabfold.batch import get_queries, run
     from colabfold.download import default_data_dir
 
@@ -208,6 +215,13 @@ def alphafold(
         zip_results=True,
         user_agent="colabfold/google-colab-batch",
     )
+
+    out_files = list(Path(out_dir).glob("**/*"))
+    if not any(f.suffix == ".zip" for f in out_files if f.is_file()):
+        raise RuntimeError(
+            f"ColabFold produced no results for {fasta_name}. "
+            "Check that the MSA server (api.colabfold.com) is reachable."
+        )
 
     # --------------------------------------------------------------------------
     # If binder_len is supplied, evaluate binder-target score using iPAE

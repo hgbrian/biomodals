@@ -98,15 +98,15 @@ image = (
         # Debug optimize_truncation results
         """sed -i '/results = {}/a\\        print(f"DEBUG optimize_truncation: Processing {len(self.region_chains)} chains", flush=True)' /tmp/mber-open/src/mber/core/truncation.py""",
         """sed -i '/results\\[chain_id\\] = (inclusion_mask, F\\[pos\\]\\[current_state\\])/a\\            print(f"DEBUG optimize_truncation: Chain {chain_id} - kept {sum(inclusion_mask)}/{len(inclusion_mask)} residues", flush=True)' /tmp/mber-open/src/mber/core/truncation.py""",
-        # Install JAX first - it pins numpy<2.0
-        "pip install jax[cuda12]==0.5.2",
+        # Install JAX and pin numpy<2.0 for openmm compatibility
+        "pip install jax[cuda12]==0.5.2 'numpy<2.0'",
         # Install PyTorch from CUDA 12.8 index
         "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128",
         # Then install mBER (requirements.txt will use already-installed numpy)
         "cd /tmp/mber-open && pip install -e .",
         "cd /tmp/mber-open/protocols && pip install -e .",
     )
-    .pip_install("boto3==1.40.42", "prody==2.6.1")
+    .pip_install("boto3==1.40.42", "prody==2.6.1", "numpy<2.0")
     # Download NanoBodyBuilder2 models during image build (v5 - use default ~/.mber/nbb2_weights)
     .run_function(download_nanobody_models, gpu="T4")
 )

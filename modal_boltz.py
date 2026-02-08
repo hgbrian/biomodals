@@ -200,6 +200,12 @@ def boltz(input_str: str, params_str: str | None = None) -> list:
     from subprocess import run
     from tempfile import TemporaryDirectory
 
+    import requests.adapters
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    _orig_send = requests.adapters.HTTPAdapter.send
+    requests.adapters.HTTPAdapter.send = lambda self, request, **kw: _orig_send(self, request, **{**kw, "verify": False})
+
     if params_str is None:
         params_str = DEFAULT_PARAMS
 

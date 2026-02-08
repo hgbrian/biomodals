@@ -54,6 +54,7 @@ image = (
             "pandas>=1.5,<3",
             "pybind11==2.11.1",
             "rdkit>=2022.9,<2025",
+            "PyYAML",
             "scikit-learn>=1.1,<2",
             "scipy>=1.10,<2",
         ]
@@ -69,11 +70,11 @@ image = (
         ],
         find_links="https://data.pyg.org/whl/torch-2.1.2+cu118.html",
     )
-    .run_commands("git clone https://github.com/gcorso/DiffDock.git")
+    .run_commands("git clone https://github.com/gcorso/DiffDock.git /DiffDock")
     .run_commands("mkdir /content")
     # running python -m inference triggers downloads we need for the docker container
     .run_commands(
-        "cd DiffDock && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && python -m inference || true"
+        "cd /DiffDock && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib && python -m inference || true"
     )
 )
 

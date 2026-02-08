@@ -87,8 +87,8 @@ image = (
         ]
     )
     .run_commands(
-        "git clone https://github.com/dauparas/LigandMPNN.git"
-        " && cd LigandMPNN"
+        "git clone https://github.com/dauparas/LigandMPNN.git /LigandMPNN"
+        " && cd /LigandMPNN"
         ' && bash get_model_params.sh "./model_params"'
     )
 )
