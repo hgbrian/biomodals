@@ -63,6 +63,8 @@ uvx modal run modal_afdesign.py --pdb in/afdesign/1igy_cropped.fixed.pdb --targe
 
 ## DiffDock
 
+WARNING: DiffDock's image build is very slow (downloads ~3GB of ESM2 + DiffDock models).
+
 Dock a .mol2 file against a local pdb file.
 DiffDock may require an 80GB A100 to run for larger proteins.
 
@@ -159,6 +161,15 @@ uvx modal run modal_iggm.py --input-fasta test_iggm.faa --antigen 5O45.pdb
 ```bash
 wget https://files.rcsb.org/download/1IVO.pdb
 uvx modal run modal_ligandmpnn.py --input-pdb 1IVO.pdb --extract-chains AC --params-str '--seed 1 --checkpoint_protein_mpnn "/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"  --chains_to_design "C" --save_stats 1'
+```
+
+## RSO (binder design)
+
+Design binders using [RSO](https://github.com/jykim/rso) (Rejection Sampling Optimization).
+```bash
+wget https://files.rcsb.org/download/5O45.pdb
+grep "^ATOM.*\ A\ " 5O45.pdb > 5O45_chainA.pdb
+uvx modal run modal_rso.py --input-pdb 5O45_chainA.pdb --num-designs 1 --traj-iters 10 --binder-len 30
 ```
 
 ## RFDiffusion
