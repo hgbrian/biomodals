@@ -186,9 +186,12 @@ def alphafold(
     with open(Path(in_dir) / fasta_name, "w") as f:
         f.write(fasta_str)
 
-    header = fasta_str.splitlines()[0]
-    fasta_seq = "".join(seq.strip() for seq in fasta_str.splitlines()[1:])
-    if header[0] != ">" or any(aa not in "ACDEFGHIKLMNPQRSTVWY:" for aa in fasta_seq):
+    lines = fasta_str.splitlines()
+    headers = [l for l in lines if l.startswith(">")]
+    fasta_seq = "".join(l.strip() for l in lines if not l.startswith(">"))
+    if len(headers) != 1:
+        raise AssertionError(f"expected exactly one '>' header (use ':' to separate chains for complexes), got {len(headers)}")
+    if any(aa not in "ACDEFGHIKLMNPQRSTVWY:" for aa in fasta_seq):
         raise AssertionError(f"invalid fasta:\n{fasta_str}")
 
     queries, is_complex = get_queries(in_dir)
