@@ -27,19 +27,10 @@ print(f"Using GPU {GPU}; TIMEOUT {TIMEOUT}")
 
 
 def set_up_pyrosetta():
-    """Installs PyRosetta using pyrosettacolabsetup.
+    """Installs PyRosetta using pyrosetta-installer."""
+    import pyrosetta_installer
 
-    Args:
-        None
-
-    Returns:
-        None
-    """
-    import pyrosettacolabsetup
-
-    pyrosettacolabsetup.install_pyrosetta(
-        serialization=True, cache_wheel_on_google_drive=False
-    )
+    pyrosetta_installer.install_pyrosetta()
 
 
 image = (
@@ -50,7 +41,7 @@ image = (
         "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
     )
     .pip_install("git+https://github.com/sokrypton/ColabDesign.git")
-    .pip_install("pyrosettacolabsetup")
+    .pip_install("pyrosetta-installer")
     .run_commands(
         "git clone https://github.com/martinpacesa/BindCraft /root/bindcraft",
         "cd /root/bindcraft && git checkout c0a48d595d4976694aa979438712ac94c16620bb",

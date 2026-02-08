@@ -42,32 +42,32 @@ image = (
     .apt_install(["git", "wget", "nano"])
     .run_commands("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib")
     .pip_install(
-        ["torch==1.13.1+cu117"], index_url="https://download.pytorch.org/whl/cu117"
+        ["torch==2.1.2+cu118"], index_url="https://download.pytorch.org/whl/cu118"
     )
-    .micromamba_install("prody==2.2.0", channels=["conda-forge", "bioconda"])
+    .micromamba_install("prody==2.4.0", channels=["conda-forge", "bioconda"])
     .pip_install(
         [
             "dllogger@git+https://github.com/NVIDIA/dllogger.git",
             "e3nn==0.5.0",
-            "fair-esm[esmfold]==2.0.0",
+            "fair-esm==2.0.0",
             "networkx==2.8.4",
-            "pandas==1.5.1",
+            "pandas>=1.5,<3",
             "pybind11==2.11.1",
-            "rdkit==2022.03.3",
-            "scikit-learn==1.1.0",
-            "scipy==1.12.0",
+            "rdkit>=2022.9,<2025",
+            "scikit-learn>=1.1,<2",
+            "scipy>=1.10,<2",
         ]
     )
     .pip_install(
         [
-            "torch-cluster==1.6.0+pt113cu117",
-            "torch-geometric==2.2.0",
-            "torch-scatter==2.1.0+pt113cu117",
-            "torch-sparse==0.6.16+pt113cu117",
-            "torch-spline-conv==1.2.1+pt113cu117",
-            "torchmetrics==0.11.0",
+            "torch-cluster",
+            "torch-geometric==2.4.0",
+            "torch-scatter",
+            "torch-sparse",
+            "torch-spline-conv",
+            "torchmetrics>=0.11,<2",
         ],
-        find_links="https://pytorch-geometric.com/whl/torch-1.13.1+cu117.html",
+        find_links="https://data.pyg.org/whl/torch-2.1.2+cu118.html",
     )
     .run_commands("git clone https://github.com/gcorso/DiffDock.git")
     .run_commands("mkdir /content")
