@@ -9,7 +9,7 @@ Run one:    uv run run_tests.py tests/test_quick_runs.py -k af2rank
 Approximate run times (GPU):
     1-2 min       esm2, pdb2png, anarci, nextflow, minimap2
     2-5 min       af2rank, chai1, boltz, boltzgen, iggm, ligandmpnn
-    5-10 min      alphafold, diffdock, md_protein_ligand, afdesign, rso
+    5-10 min      alphafold, diffdock, md_protein_ligand, afdesign, rso, protenix
     10-30 min     germinal
     30-60 min     bindcraft
 """
@@ -278,6 +278,21 @@ def test_rso():
         "--num-designs", "1",
         "--traj-iters", "10",
         "--binder-len", "30",
+    )
+
+
+def test_protenix():
+    _ensure_file(
+        "test_protenix.faa",
+        ">protein|A\n"
+        "MAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS\n",
+    )
+    _modal_run(
+        "modal_protenix.py",
+        "--input-faa", "test_protenix.faa",
+        "--seeds", "42",
+        "--no-use-msa",
+        timeout=900,
     )
 
 

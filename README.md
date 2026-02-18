@@ -172,6 +172,14 @@ grep "^ATOM.*\ A\ " 5O45.pdb > 5O45_chainA.pdb
 uvx modal run modal_rso.py --input-pdb 5O45_chainA.pdb --num-designs 1 --traj-iters 10 --binder-len 30
 ```
 
+## Protenix
+
+[Protenix](https://github.com/bytedance/Protenix), an open-source PyTorch reproduction of AlphaFold 3.
+```bash
+echo ">protein|A\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPGSLPRYLLRYKSDSDKQQGSGVPSRFSGSKDASTNAGLLLISGLQSEDEADYYCAIWYSSTS" > test_protenix.faa
+uvx modal run modal_protenix.py --input-faa test_protenix.faa --seeds 42 --no-use-msa
+```
+
 ## RFDiffusion
 Not working currently due to library incompatibilities!
 I am not sure this model is useful anymore.
