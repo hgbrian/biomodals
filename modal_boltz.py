@@ -80,6 +80,8 @@ image = (
     Image.debian_slim(python_version="3.11")
     .micromamba()
     .apt_install("wget", "git", "gcc", "g++")
+    # NB: keep this as pip_install — uv's strict build isolation breaks pandas'
+    # legacy pkg_resources dependency when building via colabfold's git source.
     .pip_install(
         "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold@acc0bf772f22feb7f887ad132b7313ff415c8a9f"
     )
@@ -93,7 +95,7 @@ image = (
     .run_commands("python -m colabfold.download")
     .apt_install("build-essential")
     # Install CUDA toolkit via conda
-    .pip_install(
+    .uv_pip_install(
         "boltz==2.2.1",
         "pyyaml",
         "pandas",

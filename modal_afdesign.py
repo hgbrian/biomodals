@@ -50,10 +50,10 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 image = (
     Image.micromamba()
     .apt_install("git", "wget", "aria2", "ffmpeg")
-    .pip_install(
+    .uv_pip_install(
         "pdb-tools==2.4.8", "ffmpeg-python==0.2.0", "plotly==5.18.0", "kaleido==0.2.1"
     )
-    .pip_install(
+    .uv_pip_install(
         "git+https://github.com/sokrypton/ColabDesign.git@v1.1.2", "jax[cuda12_pip]==0.5.3"
     )
     .run_commands(
@@ -64,7 +64,7 @@ image = (
         "aria2c -q -x 16 https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar;"
         "tar -xf alphafold_params_2022-12-06.tar -C /params"
     )
-    .pip_install("matplotlib==3.8.1")
+    .uv_pip_install("matplotlib==3.8.1")
 )
 
 with image.imports():

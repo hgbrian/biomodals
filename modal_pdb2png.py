@@ -17,7 +17,7 @@ image = (
     .micromamba_install("pymol-open-source==2.5.0", channels=["conda-forge"])
     .apt_install("libgl1")
     .apt_install("g++")
-    .pip_install(["ProDy==2.4.1"])
+    .uv_pip_install(["ProDy==2.4.1"])
 )
 
 

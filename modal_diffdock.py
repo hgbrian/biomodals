@@ -41,11 +41,11 @@ image = (
     Image.micromamba(python_version="3.10")
     .apt_install(["git", "wget", "nano"])
     .run_commands("export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib")
-    .pip_install(
+    .uv_pip_install(
         ["torch==2.1.2+cu118"], index_url="https://download.pytorch.org/whl/cu118"
     )
     .micromamba_install("prody==2.4.0", channels=["conda-forge", "bioconda"])
-    .pip_install(
+    .uv_pip_install(
         [
             "dllogger@git+https://github.com/NVIDIA/dllogger.git",
             "e3nn==0.5.0",
@@ -59,7 +59,7 @@ image = (
             "scipy>=1.10,<2",
         ]
     )
-    .pip_install(
+    .uv_pip_install(
         [
             "torch-cluster",
             "torch-geometric==2.4.0",

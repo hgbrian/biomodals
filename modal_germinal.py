@@ -204,7 +204,7 @@ image = (
         "libc++abi-dev",  # Add this
         "dssp",  # Add DSSP for protein secondary structure analysis
     )
-    .pip_install(
+    .uv_pip_install(
         [
             "polars==1.19.0",
             "hydra-core>=1.3.0",
@@ -228,12 +228,12 @@ image = (
         "ln -sf /usr/bin/llvm-nm /tools/llvm/bin/llvm-nm",
         "ln -sf /usr/bin/llvm-ranlib /tools/llvm/bin/llvm-ranlib",
     )
-    .pip_install("mdtraj==1.9.9")
+    .uv_pip_install("mdtraj==1.9.9")
     .run_commands(
         "pip install 'jax[cuda12_pip]==0.5.3' -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
     )
-    .pip_install(
-        "https://west.rosettacommons.org/pyrosetta/release/release/PyRosetta4.Release.python310.ubuntu.wheel/pyrosetta-2025.37+release.df75a9c48e-cp310-cp310-linux_x86_64.whl"
+    .uv_pip_install(
+        "https://west.rosettacommons.org/pyrosetta/release/release/PyRosetta4.Release.python310.ubuntu.wheel/pyrosetta-2026.21+release.36f0c659eb-cp310-cp310-linux_x86_64.whl"
     )
     .run_commands(
         "ln -s /usr/local/lib/python3.*/dist-packages/colabdesign colabdesign"
@@ -242,12 +242,12 @@ image = (
         "git clone https://github.com/SantiagoMille/germinal.git /tmp/germinal",
         "cd /tmp/germinal && git checkout 88d7f85aeb78684b05f872ec524255535ad15106",
     )
-    .pip_install("cvxopt==1.3.2")
+    .uv_pip_install("cvxopt==1.3.2")
     .run_commands("cd /tmp/germinal && pip install -e .")
     .run_function(patch_germinal_code)
-    .pip_install("git+https://github.com/chaidiscovery/chai-lab.git")
-    .pip_install("dm-haiku==0.0.13")
-    .pip_install("joblib==1.5.2")
+    .uv_pip_install("git+https://github.com/chaidiscovery/chai-lab.git")
+    .uv_pip_install("dm-haiku==0.0.13")
+    .uv_pip_install("joblib==1.5.2")
     .run_commands(
         """find /usr/local/lib/python3.10/site-packages/haiku -name "*.py" -exec sed -i 's/jax\\.linear_util/jax._src.linear_util/g' {} +"""
     )

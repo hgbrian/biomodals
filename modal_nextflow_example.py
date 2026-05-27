@@ -30,7 +30,7 @@ workflow {
 image = (
     Image.debian_slim()
     .apt_install("git", "wget", "curl", "unzip", "zip", "procps")
-    .pip_install("polars")
+    .uv_pip_install("polars")
     #
     # Install nextflow
     #

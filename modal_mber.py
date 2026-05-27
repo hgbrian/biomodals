@@ -106,7 +106,7 @@ image = (
         "cd /tmp/mber-open && pip install -e .",
         "cd /tmp/mber-open/protocols && pip install -e .",
     )
-    .pip_install("boto3==1.40.42", "prody==2.6.1", "numpy<2.0")
+    .uv_pip_install("boto3==1.40.42", "prody==2.6.1", "numpy<2.0")
     # Download NanoBodyBuilder2 models during image build (v5 - use default ~/.mber/nbb2_weights)
     .run_function(download_nanobody_models, gpu="T4")
 )

@@ -109,7 +109,7 @@ image = (
     Image.from_registry("nvidia/cuda:12.6.3-devel-ubuntu22.04", add_python="3.12")
     .entrypoint([])
     .apt_install("git", "wget", "g++", "gcc", "make", "clang")
-    .pip_install("protenix==1.0.4")
+    .uv_pip_install("protenix==1.0.4")
     .env({"CUDA_HOME": "/usr/local/cuda"})
     .run_function(download_models, gpu="A10G")
 )

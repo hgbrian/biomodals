@@ -82,12 +82,12 @@ def download_models():
 image = (
     Image.micromamba(python_version="3.10")
     .apt_install("git", "wget", "build-essential")
-    .pip_install(
+    .uv_pip_install(
         "torch==2.1.2+cu121",
         "torchvision==0.16.2+cu121",
         index_url="https://download.pytorch.org/whl/cu121",
     )
-    .pip_install(
+    .uv_pip_install(
         "torch_geometric==2.5.2",
         "pyg_lib",
         "torch_scatter",
@@ -96,7 +96,7 @@ image = (
         "torch_spline_conv",
         find_links="https://data.pyg.org/whl/torch-2.1.0+cu121.html",
     )
-    .pip_install(
+    .uv_pip_install(
         "numpy==1.23.5",
         "pandas==2.2.2",
         "scipy==1.14.0",
@@ -109,7 +109,7 @@ image = (
         "polars==1.19.0",
         "openmm==8.3.1",
     )
-    .pip_install("ml-collections")
+    .uv_pip_install("ml-collections")
     .micromamba_install("pdbfixer", channels=["conda-forge"])
     .run_commands("git clone https://github.com/TencentAI4S/IgGM.git", "mv IgGM /root/")
     .run_commands(
@@ -118,8 +118,8 @@ image = (
         "cd /root/IgGM && sed -i 's/torch.from_numpy(residue\\[atom_name\\].get_coord())/torch.tensor(residue[atom_name].get_coord(), dtype=torch.float32)/' IgGM/protein/parser/pdb_parser.py"
     )
     .run_function(download_models)
-    .pip_install("prody==2.6.1")
-    .pip_install("ipython")
+    .uv_pip_install("prody==2.6.1")
+    .uv_pip_install("ipython")
 )
 
 app = App("iggm", image=image)

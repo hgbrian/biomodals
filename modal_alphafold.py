@@ -23,7 +23,7 @@ TIMEOUT = os.environ.get("TIMEOUT", 20)
 image = (
     Image.micromamba(python_version="3.11")
     .apt_install("wget", "git")
-    .pip_install(
+    .uv_pip_install(
         "colabfold[alphafold-minus-jax]@git+https://github.com/sokrypton/ColabFold@a134f6a8f8de5c41c63cb874d07e1a334cb021bb"
     )
     .micromamba_install(

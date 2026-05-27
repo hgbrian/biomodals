@@ -24,7 +24,7 @@ from modal import App, Image
 image = (
     Image.micromamba()
     .apt_install("git")
-    .pip_install("biopython")
+    .uv_pip_install("biopython")
     .micromamba_install(["libstdcxx-ng", "hmmer=3.3.2"], channels=["conda-forge", "bioconda"])
     .run_commands(
         "git clone https://github.com/oxpig/ANARCI && cd ANARCI && python setup.py install"

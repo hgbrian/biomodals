@@ -45,7 +45,7 @@ DEFAULT_PARAMS = '--seed 1 --checkpoint_protein_mpnn "/LigandMPNN/model_params/p
 image = (
     Image.micromamba(python_version="3.11")
     .apt_install(["git", "wget", "gcc", "g++", "libffi-dev"])
-    .pip_install(
+    .uv_pip_install(
         [
             "biopython==1.79",
             "filelock==3.13.1",
@@ -57,7 +57,7 @@ image = (
             "numpy==1.23.5",
         ]
     )
-    .pip_install(
+    .uv_pip_install(
         [
             "nvidia-cublas-cu12==12.1.3.1",
             "nvidia-cuda-cupti-cu12==12.1.105",
@@ -73,7 +73,7 @@ image = (
             "nvidia-nvtx-cu12==12.1.105",
         ]
     )
-    .pip_install(
+    .uv_pip_install(
         [
             "ProDy==2.4.1",
             "pyparsing==3.1.1",

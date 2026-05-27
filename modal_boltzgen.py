@@ -53,7 +53,7 @@ def download_boltzgen_models():
 image = (
     Image.debian_slim()
     .apt_install("git", "wget", "build-essential")
-    .pip_install("torch>=2.4.1")
+    .uv_pip_install("torch>=2.4.1")
     .run_commands(
         "git clone https://github.com/HannesStark/boltzgen /root/boltzgen",
         "cd /root/boltzgen && git checkout 247b9bbd8b68a60aba854c2968d6a0cddd21ad6d && pip install -e .",  # Dec 18 2025 - includes weights_only fix

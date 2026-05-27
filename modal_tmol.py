@@ -43,8 +43,8 @@ TMOL_WHEEL = (
 
 image = (
     Image.debian_slim(python_version="3.12")
-    .pip_install("torch", index_url="https://download.pytorch.org/whl/cu126")
-    .pip_install(TMOL_WHEEL)
+    .uv_pip_install("torch", index_url="https://download.pytorch.org/whl/cu126")
+    .uv_pip_install(TMOL_WHEEL)
 )
 
 app = App("tmol", image=image)

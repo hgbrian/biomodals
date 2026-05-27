@@ -29,11 +29,11 @@ def download_model():
 image = (
     Image.micromamba(python_version="3.10")
     .apt_install(["git", "wget", "gcc", "g++", "libffi-dev"])
-    .pip_install(
+    .uv_pip_install(
         ["torch==1.13.1+cu117"], index_url="https://download.pytorch.org/whl/cu117"
     )
-    .pip_install(["fair-esm"])
-    .pip_install(["pandas", "matplotlib"])
+    .uv_pip_install(["fair-esm"])
+    .uv_pip_install(["pandas", "matplotlib"])
     .run_function(download_model, gpu=GPU)
 )
 

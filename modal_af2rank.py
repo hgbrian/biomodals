@@ -34,7 +34,7 @@ TIMEOUT = os.environ.get("MODAL_TIMEOUT", 20 * 60)
 image = (
     Image.micromamba()
     .apt_install("wget", "curl", "git", "g++")
-    .pip_install(
+    .uv_pip_install(
         "git+https://github.com/sokrypton/ColabDesign.git@v1.1.3",
         "jax[cuda12_pip]==0.5.3",
     )
@@ -46,7 +46,7 @@ image = (
         "g++ -static -O3 -ffast-math -lm -o TMscore TMscore.cpp",
         "cp TMscore /root/",
     )
-    .pip_install("ipython")
+    .uv_pip_install("ipython")
 )
 
 app = App("af2rank", image=image)

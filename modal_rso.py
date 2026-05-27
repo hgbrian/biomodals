@@ -18,7 +18,7 @@ TIMEOUT = int(os.environ.get("TIMEOUT", 180))
 image = (
     modal.Image.debian_slim()
     .apt_install("wget", "git")
-    .pip_install(
+    .uv_pip_install(
         "numpy",
         "pandas",
         "biopython",

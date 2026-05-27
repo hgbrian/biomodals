@@ -301,6 +301,20 @@ def test_mber():
     _modal_run("modal_mber.py", "--target-pdb", "7STF.pdb", "--target-name", "PDL1", timeout=900)
 
 
+def test_sasa():
+    _download("https://files.rcsb.org/download/1CRN.pdb", "1CRN.pdb")
+    _modal_run("modal_sasa.py", "--input-pdb", "1CRN.pdb")
+
+
+def test_usalign():
+    pdb = _download("https://files.rcsb.org/download/5O45.pdb", "5O45.pdb")
+    chainA = REPO_ROOT / "5O45_chainA.pdb"
+    if not chainA.exists():
+        lines = [l for l in pdb.read_text().splitlines(keepends=True) if l.startswith("ATOM") and l[21] == "A"]
+        chainA.write_text("".join(lines))
+    _modal_run("modal_usalign.py", "--pdb", "5O45.pdb", "--vs-pdbs", "5O45_chainA.pdb")
+
+
 def test_faspr():
     _download("https://files.rcsb.org/download/1CRN.pdb", "1CRN.pdb")
     _modal_run("modal_faspr.py", "--input-pdb", "1CRN.pdb")
