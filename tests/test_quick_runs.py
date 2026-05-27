@@ -299,3 +299,14 @@ def test_protenix():
 def test_mber():
     _download("https://files.rcsb.org/download/7STF.pdb", "7STF.pdb")
     _modal_run("modal_mber.py", "--target-pdb", "7STF.pdb", "--target-name", "PDL1", timeout=900)
+
+
+def test_faspr():
+    _download("https://files.rcsb.org/download/1CRN.pdb", "1CRN.pdb")
+    _modal_run("modal_faspr.py", "--input-pdb", "1CRN.pdb")
+
+
+def test_tmol():
+    _download("https://files.rcsb.org/download/1CRN.pdb", "1CRN.pdb")
+    # --no-faspr to avoid requiring `modal deploy modal_faspr.py` first
+    _modal_run("modal_tmol.py", "--input-pdb", "1CRN.pdb", "--no-faspr")

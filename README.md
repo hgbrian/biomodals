@@ -212,6 +212,32 @@ EOF
 uvx --with PyYAML modal run modal_germinal.py --target-yaml target_example.yaml --max-trajectories 1 --max-passing-designs 1
 ```
 
+## FASPR (side-chain packing)
+
+[FASPR](https://github.com/tommyhuangthu/FASPR) — fast and accurate side-chain
+packing. Repacks side chains of a PDB (requires complete main-chain atoms) and
+can introduce mutations via a sequence file.
+
+```bash
+wget https://files.rcsb.org/download/1CRN.pdb
+uvx modal run modal_faspr.py --input-pdb 1CRN.pdb
+```
+
+## tmol (Rosetta energy scoring)
+
+[tmol](https://github.com/uw-ipd/tmol) — GPU-accelerated Rosetta beta_nov2016
+energy scoring. Runs an L-BFGS Cartesian relax and (optionally) a FASPR repack
+before scoring. Pass `--input-dir` to score every PDB in a directory in parallel.
+
+Note: tmol requires a clean PDB (no chain breaks, no missing residues, no
+extra hydrogens). PDBs straight from the RCSB often need preprocessing.
+
+```bash
+modal deploy modal_faspr.py     # only needed if using --faspr (default)
+wget https://files.rcsb.org/download/1CRN.pdb
+uvx modal run modal_tmol.py --input-pdb 1CRN.pdb
+```
+
 ## mBER (VHH nanobody design)
 
 Design VHH nanobody binders against a target protein using [mBER](https://github.com/manifoldbio/mber-open).
