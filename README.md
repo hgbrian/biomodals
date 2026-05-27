@@ -181,11 +181,6 @@ echo ">protein|A\nMAWTPLLLLLLSHCTGSLSQPVLTQPTSLSASPGASARFTCTLRSGINVGTYRIYWYQQKPG
 uv run --with modal modal run modal_protenix.py --input-faa test_protenix.faa --seeds 42 --no-use-msa
 ```
 
-## RFDiffusion
-Not working currently due to library incompatibilities!
-I am not sure this model is useful anymore.
-I would use one of the many newer options (especially BindCraft and BoltzGen).
-
 ## Germinal
 Germinal took some serious hacking to get working.
 It seems to work ok but buyer beware.
