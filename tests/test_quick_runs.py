@@ -3,15 +3,21 @@
 WARNING: These tests are SLOW, use GPU cloud resources, and COST MONEY.
 They are excluded from the default test run.
 
-Run all:    uv run run_tests.py tests/test_quick_runs.py
-Run one:    uv run run_tests.py tests/test_quick_runs.py -k af2rank
+Run all:    uv run --with modal --with pytest pytest tests/test_quick_runs.py -v
+Run one:    uv run --with modal --with pytest pytest tests/test_quick_runs.py -v -k sasa
 
 Approximate run times (GPU):
-    1-2 min       esm2, pdb2png, anarci, nextflow, minimap2
-    2-5 min       af2rank, chai1, boltz, boltzgen, iggm, ligandmpnn
-    5-10 min      alphafold, diffdock, md_protein_ligand, afdesign, rso, protenix
+    1-2 min       esm2, pdb2png, anarci, nextflow, minimap2, faspr, sasa, usalign
+    2-5 min       af2rank, chai1, boltz, boltzgen, iggm, ligandmpnn, tmol
+    5-10 min      alphafold, diffdock, md_protein_ligand, afdesign, rso, protenix, mber
     10-30 min     germinal
     30-60 min     bindcraft
+
+Approximate cost (Modal GPU compute, ~$1-3/hr depending on tier):
+    Running the full suite once: ~$5-15.
+    bindcraft alone (A100): ~$2-4.
+    germinal: ~$1-2.
+    The rest combined: ~$2-4.
 """
 
 import subprocess

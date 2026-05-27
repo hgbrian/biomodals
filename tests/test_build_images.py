@@ -23,16 +23,6 @@ REPO_ROOT = Path(__file__).parent.parent
 MODAL_FILES = sorted(REPO_ROOT.glob("modal_*.py"))
 
 
-def pytest_collection_modifyitems(config, items):
-    build_tests = [i for i in items if "test_build_images" in str(i.fspath)]
-    if build_tests:
-        print(
-            "\nWARNING: Image build tests are SLOW (5-30 min per app) "
-            "and use Modal cloud resources.\n",
-            file=sys.stderr,
-        )
-
-
 @pytest.fixture(params=MODAL_FILES, ids=lambda p: p.name)
 def modal_file(request):
     return request.param
