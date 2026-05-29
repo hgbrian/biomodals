@@ -92,6 +92,11 @@ def test_esm2():
     _modal_run("modal_esm2_predict_masked.py", "--input-faa", "test_esm2.faa")
 
 
+def test_esmfold2():
+    _ensure_file("test_esmfold2.faa", ">protein|insulin\nGIVEQCCTSICSLYQLENYCN\n")
+    _modal_run("modal_esmfold2.py", "--input-faa", "test_esmfold2.faa", timeout=1200)
+
+
 def test_pdb2png():
     _download("https://files.rcsb.org/download/1YWI.pdb", "1YWI.pdb")
     _modal_run(

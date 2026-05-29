@@ -26,6 +26,7 @@ Sorted alphabetically.
 - [Chai-1](#chai-1) — AF3-like open structure prediction
 - [DiffDock](#diffdock) — small molecule docking
 - [ESM2](#esm2-masked-position-prediction) — masked amino acid prediction
+- [ESMFold2](#esmfold2) — single-sequence / complex structure prediction
 - [FASPR](#faspr-side-chain-packing) — side-chain packing
 - [Germinal](#germinal) — binder design
 - [IgGM](#iggm) — antibody design
@@ -135,6 +136,17 @@ Predict the amino acid at a masked position in a sequence.
 ```bash
 printf '>1\nMA<mask>GMT\n' > test_esm2.faa
 uv run --with modal modal run modal_esm2_predict_masked.py --input-faa test_esm2.faa
+```
+
+## ESMFold2
+
+[ESMFold2](https://github.com/Biohub/esm) (Biohub) — single-sequence / complex
+structure prediction. No MSA required (PLM-only). Multi-entity FASTA: header
+type tags `protein|`, `dna|`, `rna|`, `ligand|` (SMILES for ligand) are honored.
+
+```bash
+printf '>protein|name=insulin\nGIVEQCCTSICSLYQLENYCN\n' > test_esmfold2.faa
+uv run --with modal modal run modal_esmfold2.py --input-faa test_esmfold2.faa
 ```
 
 ## FASPR (side-chain packing)
