@@ -26,7 +26,8 @@ To do this, we maximize number of contacts at the interface and maximize pLDDT o
 
 Example:
 ```
-modal run modal_afdesign.py --target-chain C --pdb in/afdesign/1igy.pdb
+wget https://files.rcsb.org/download/1IGY.pdb
+modal run modal_afdesign.py --target-chain C --pdb 1IGY.pdb
 ```
 """
 
