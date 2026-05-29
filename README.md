@@ -31,7 +31,6 @@ Sorted alphabetically.
 - [IgGM](#iggm) — antibody design
 - [LigandMPNN](#ligandmpnn) — protein sequence design conditioned on ligands
 - [mBER](#mber-vhh-nanobody-design) — VHH nanobody design
-- [MD_protein_ligand](#md_protein_ligand) — molecular dynamics
 - [minimap2](#minimap2-short-reads-example) — short-read alignment
 - [nextflow](#nextflow) — nextflow hello-world image
 - [pdb2png](#pdb2png) — PDB → PNG rendering via pymol
@@ -204,19 +203,6 @@ With custom masked sequence (* = positions to design):
 ```bash
 uv run --with modal modal run modal_mber.py --target-pdb target.pdb --target-name MyTarget \
     --masked-binder-seq "EVQLVESGGGLVQPGGSLRLSCAASG*********WFRQAPGKEREF***********NADSVKGRFTISRDNAKNTLYLQMNSLRAEDTAVYYC************WGQGTLVTVSS"
-```
-
-## MD_protein_ligand
-Basic MD
-```bash
-wget https://files.rcsb.org/download/5O45.pdb
-grep "^ATOM.*\ A\ " 5O45.pdb > 5O45_chainA.pdb
-uv run --with modal modal run modal_md_protein_ligand.py --pdb-id 5O45_chainA.pdb
-```
-
-Basic MD protein + ligand
-```bash
-uv run --with modal modal run modal_md_protein_ligand.py --pdb-id 4O75 --ligand-id 2RC --ligand-chain A
 ```
 
 ## minimap2 (short reads example)

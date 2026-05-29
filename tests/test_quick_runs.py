@@ -9,7 +9,7 @@ Run one:    uv run --with modal --with pytest pytest tests/test_quick_runs.py -v
 Approximate run times (GPU):
     1-2 min       esm2, pdb2png, anarci, nextflow, minimap2, faspr, sasa, usalign
     2-5 min       af2rank, chai1, boltz, boltzgen, iggm, ligandmpnn, tmol
-    5-10 min      alphafold, diffdock, md_protein_ligand, afdesign, rso, protenix, mber
+    5-10 min      alphafold, diffdock, afdesign, rso, protenix, mber
     10-30 min     germinal
     30-60 min     bindcraft
 
@@ -126,15 +126,6 @@ def test_chai1():
         "N[C@@H](Cc1ccc(O)cc1)C(=O)O\n",
     )
     _modal_run("modal_chai1.py", "--input-faa", "test_chai1.faa")
-
-
-def test_md_protein_ligand():
-    pdb = _download("https://files.rcsb.org/download/5O45.pdb", "5O45.pdb")
-    chainA = REPO_ROOT / "5O45_chainA.pdb"
-    if not chainA.exists():
-        lines = [l for l in pdb.read_text().splitlines(keepends=True) if l.startswith("ATOM") and l[21] == "A"]
-        chainA.write_text("".join(lines))
-    _modal_run("modal_md_protein_ligand.py", "--pdb-id", "5O45_chainA.pdb", timeout=900)
 
 
 def test_boltz():
